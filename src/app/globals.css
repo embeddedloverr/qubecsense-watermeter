@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  --primary: 201 96% 32%;          /* deep water blue */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 187 72% 38%;        /* teal accent */
+  --secondary-foreground: 0 0% 100%;
+
+  --muted: 214 32% 91%;
+  --muted-foreground: 215 16% 42%;
+
+  --accent: 199 89% 94%;
+  --accent-foreground: 201 96% 26%;
+
+  --success: 142 64% 34%;
+  --success-foreground: 0 0% 100%;
+
+  --warning: 35 92% 45%;
+  --warning-foreground: 0 0% 100%;
+
+  --destructive: 0 72% 46%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 214 24% 86%;
+  --input: 214 24% 84%;
+  --ring: 201 96% 38%;
+
+  --radius: 0.7rem;
+}
+
+.dark {
+  --background: 222 47% 9%;
+  --foreground: 210 40% 96%;
+
+  --card: 222 40% 13%;
+  --card-foreground: 210 40% 96%;
+
+  --primary: 199 89% 52%;
+  --primary-foreground: 222 47% 9%;
+
+  --secondary: 187 72% 45%;
+  --secondary-foreground: 222 47% 9%;
+
+  --muted: 217 28% 20%;
+  --muted-foreground: 215 20% 68%;
+
+  --accent: 201 60% 20%;
+  --accent-foreground: 199 89% 80%;
+
+  --success: 142 60% 45%;
+  --success-foreground: 222 47% 9%;
+
+  --warning: 35 92% 55%;
+  --warning-foreground: 222 47% 9%;
+
+  --destructive: 0 72% 56%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 217 24% 24%;
+  --input: 217 24% 26%;
+  --ring: 199 89% 52%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "rlig" 1, "calt" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures for data/numbers */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Thin, themed scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+
+/* Signature canvas */
+.signature-canvas {
+  touch-action: none;
+}
