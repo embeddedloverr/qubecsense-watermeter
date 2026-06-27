@@ -15,24 +15,24 @@ export default async function TechnicianHome() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const [completedCount, recent, planned] = await Promise.all([
+  const [completedCount, todayCount, recent, planned] = await Promise.all([
     Installation.countDocuments({ technicianId: session.sub }),
+    Installation.countDocuments({
+      technicianId: session.sub,
+      createdAt: { $gte: today, $lt: tomorrow },
+    }),
     Installation.find({ technicianId: session.sub })
       .sort({ createdAt: -1 })
-      .limit(6)
+      .limit(100)
       .lean(),
     Schedule.find({ technicianId: session.sub, status: "planned" })
       .sort({ scheduledDate: 1 })
       .limit(8)
       .lean(),
   ]);
-
-  const todayCount = (recent as any[]).filter((r) => {
-    const d = new Date(r.createdAt);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime() === today.getTime();
-  }).length;
 
   return (
     <div className="space-y-5">
@@ -123,8 +123,8 @@ export default async function TechnicianHome() {
       {/* Recent installs */}
       <section>
         <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
-          <IconCheckCircle className="h-4 w-4 text-success" /> Recent
-          installations
+          <IconCheckCircle className="h-4 w-4 text-success" /> Your installations
+          <span className="ml-auto text-xs font-normal text-muted-foreground">{completedCount} total</span>
         </h2>
         {recent.length === 0 ? (
           <Card>
