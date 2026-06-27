@@ -15,16 +15,14 @@ export async function GET(
   }
 
   await connectDB();
-  const photo = await Photo.findById(params.id).lean<{
-    data: Buffer;
-    contentType: string;
-  }>();
+  // Don't use .lean() — Mongoose must convert BSON Binary → Node Buffer for us.
+  const photo = await Photo.findById(params.id).select("data contentType");
 
   if (!photo) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const body = new Uint8Array(photo.data as unknown as Buffer);
+  const body = new Uint8Array(photo.data as Buffer);
   return new NextResponse(body, {
     status: 200,
     headers: {
