@@ -6,5 +6,5 @@ export const dynamic = "force-dynamic";
 export default async function RootPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  redirect(session.role === "admin" ? "/admin" : "/technician");
+  redirect(session.role === "admin" ? "/admin/live-data" : "/technician");
 }

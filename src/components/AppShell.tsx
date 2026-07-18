@@ -13,6 +13,7 @@ import {
   IconCalendar,
   IconUsers,
   IconLogout,
+  IconGauge,
 } from "./icons";
 
 export interface NavUser {
@@ -33,6 +34,7 @@ const techNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
+  { href: "/admin/live-data", label: "Live Data", icon: IconGauge },
   { href: "/admin", label: "Overview", icon: IconDashboard },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
   { href: "/admin/installations", label: "Records", icon: IconHome },

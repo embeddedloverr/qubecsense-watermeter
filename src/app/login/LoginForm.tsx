@@ -42,7 +42,7 @@ export function LoginForm() {
         from && !from.startsWith("/login")
           ? from
           : data.user.role === "admin"
-            ? "/admin"
+            ? "/admin/live-data"
             : "/technician";
       router.replace(dest);
       router.refresh();

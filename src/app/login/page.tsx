@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
   const session = await getSession();
-  if (session) redirect(session.role === "admin" ? "/admin" : "/technician");
+  if (session)
+    redirect(session.role === "admin" ? "/admin/live-data" : "/technician");
 
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10">
