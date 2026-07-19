@@ -57,6 +57,8 @@ interface Meter {
 
 interface FlatData {
   flat: string;
+  ownerName?: string;
+  ownerPhone?: string;
   totalConsumptionLitres: number;
   consumptionByDate: Record<string, number>;
   meters: Meter[];
@@ -363,7 +365,11 @@ export function AdminLiveData() {
     if (!data) return [];
     const q = query.trim().toLowerCase();
     if (!q) return data.flats;
-    return data.flats.filter((f) => f.flat.toLowerCase().includes(q));
+    return data.flats.filter(
+      (f) =>
+        f.flat.toLowerCase().includes(q) ||
+        (f.ownerName || "").toLowerCase().includes(q)
+    );
   }, [data, query]);
 
   const totalsByDate = React.useMemo(() => {
@@ -408,6 +414,7 @@ export function AdminLiveData() {
     if (!data) return;
     const header = [
       "Flat",
+      "Owner",
       "Location",
       "Device ID",
       "Date",
@@ -417,10 +424,11 @@ export function AdminLiveData() {
       "Status",
     ];
     const rows: (string | number)[][] = [];
-    const push = (flat: string, m: Meter) => {
+    const push = (flat: string, owner: string, m: Meter) => {
       for (const r of m.readings) {
         rows.push([
           flat,
+          owner,
           m.location || "",
           m.deviceId,
           r.date,
@@ -431,8 +439,9 @@ export function AdminLiveData() {
         ]);
       }
     };
-    for (const f of data.flats) for (const m of f.meters) push(f.flat, m);
-    for (const m of data.unassigned) push("Unassigned", m);
+    for (const f of data.flats)
+      for (const m of f.meters) push(f.flat, f.ownerName || "", m);
+    for (const m of data.unassigned) push("Unassigned", "", m);
     const csv = [header, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -488,7 +497,7 @@ export function AdminLiveData() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search flat…"
+            placeholder="Search flat or owner…"
             className="pl-9"
           />
         </div>
@@ -584,6 +593,7 @@ export function AdminLiveData() {
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <th className="px-5 py-3 font-medium">Flat</th>
+                  <th className="px-5 py-3 font-medium">Owner</th>
                   <th className="px-5 py-3 font-medium">Kitchen</th>
                   <th className="px-5 py-3 font-medium">Bathroom</th>
                   <th className="px-5 py-3 font-medium">Total · {days}d</th>
@@ -617,6 +627,9 @@ export function AdminLiveData() {
                   return (
                     <tr key={f.flat} className="hover:bg-muted/40">
                       <td className="tabular px-5 py-3 font-semibold">{f.flat}</td>
+                      <td className="max-w-[160px] truncate px-5 py-3 text-muted-foreground">
+                        {f.ownerName || "—"}
+                      </td>
                       <td className="tabular px-5 py-3 text-muted-foreground">
                         {kitchen.length ? litres(sum(kitchen)) : "—"}
                       </td>
@@ -673,6 +686,11 @@ export function AdminLiveData() {
                     <div className="min-w-0">
                       <p className="tabular font-semibold text-foreground">
                         Flat {f.flat}
+                        {f.ownerName && (
+                          <span className="ml-1.5 font-normal text-muted-foreground">
+                            · {f.ownerName}
+                          </span>
+                        )}
                       </p>
                       <p className="truncate text-sm text-muted-foreground">
                         {litres(f.totalConsumptionLitres)} · {f.meters.length} meter
@@ -782,6 +800,13 @@ function FlatDetailModal({
               Flat {flat.flat}
             </h2>
             <p className="text-sm text-muted-foreground">
+              {flat.ownerName && (
+                <>
+                  {flat.ownerName}
+                  {flat.ownerPhone ? ` · ${flat.ownerPhone}` : ""}
+                  {" — "}
+                </>
+              )}
               {litres(flat.totalConsumptionLitres)} in range ·{" "}
               {flat.meters.length} meter{flat.meters.length === 1 ? "" : "s"}
             </p>

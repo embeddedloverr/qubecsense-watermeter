@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { connectDB } from "@/lib/db";
+import { Flat } from "@/lib/models/Flat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +45,29 @@ export async function GET(req: NextRequest) {
         { status: 502 }
       );
     }
+
+    // Enrich flats with owner details from our own database.
+    if (Array.isArray(body?.flats) && body.flats.length) {
+      try {
+        await connectDB();
+        const flats = await Flat.find(
+          {},
+          { flatNumber: 1, ownerName: 1, ownerPhone: 1 }
+        ).lean();
+        const byNumber = new Map(
+          (flats as any[]).map((f) => [String(f.flatNumber), f])
+        );
+        for (const f of body.flats) {
+          const owner = byNumber.get(String(f.flat));
+          f.ownerName = owner?.ownerName || "";
+          f.ownerPhone = owner?.ownerPhone || "";
+        }
+      } catch (err) {
+        // Owner names are a nice-to-have; still serve meter data if the DB is down.
+        console.error("live-data owner join error", err);
+      }
+    }
+
     return NextResponse.json(body);
   } catch (err) {
     console.error("live-data proxy error", err);
