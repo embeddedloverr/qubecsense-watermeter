@@ -153,3 +153,10 @@ export const IconPen = (p: IconProps) => (
     <path d="M14.5 6.5l3 3" />
   </svg>
 );
+
+export const IconRupee = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 3h12M6 8h12" />
+    <path d="M9 3c4 0 6 1.5 6 5 0 3.5-2 5-6 5H8l8 8" />
+  </svg>
+);
