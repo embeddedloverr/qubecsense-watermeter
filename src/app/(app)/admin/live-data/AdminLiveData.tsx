@@ -4,7 +4,10 @@ import * as React from "react";
 import {
   ResponsiveContainer,
   BarChart,
+  ComposedChart,
   Bar,
+  Line,
+  Legend,
   XAxis,
   YAxis,
   Tooltip,
@@ -183,6 +186,90 @@ function IntradayChart({ values }: { values: number[] }) {
         <Tooltip content={<ChartTooltip unit="L" />} cursor={{ fill: "hsl(var(--muted))" }} />
         <Bar dataKey="value" name="Litres" fill={SECONDARY} radius={[3, 3, 0, 0]} maxBarSize={18} />
       </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Day-wise kitchen/bathroom consumption for one flat, with the building's
+ *  per-flat average overlaid for comparison. */
+function FlatDailyChart({
+  flat,
+  dates,
+  avgByDate,
+}: {
+  flat: FlatData;
+  dates: string[];
+  avgByDate: Record<string, number>;
+}) {
+  const data = dates.map((date) => {
+    let kitchen = 0;
+    let bathroom = 0;
+    let other = 0;
+    for (const m of flat.meters) {
+      const r = m.readings.find((x) => x.date === date);
+      if (!r) continue;
+      const loc = (m.location || "").toLowerCase();
+      if (loc === "kitchen") kitchen += r.consumptionLitres;
+      else if (loc === "bathroom") bathroom += r.consumptionLitres;
+      else other += r.consumptionLitres;
+    }
+    return {
+      label: new Date(date).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+      }),
+      Kitchen: kitchen,
+      Bathroom: bathroom,
+      Other: other,
+      "Building avg": Math.round(avgByDate[date] || 0),
+    };
+  });
+  const hasOther = data.some((d) => d.Other > 0);
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+          tickLine={false}
+          axisLine={false}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+          tickLine={false}
+          axisLine={false}
+        />
+        <Tooltip content={<ChartTooltip unit="L" />} cursor={{ fill: "hsl(var(--muted))" }} />
+        <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
+        <Bar dataKey="Kitchen" stackId="a" fill={PRIMARY} maxBarSize={22} />
+        <Bar
+          dataKey="Bathroom"
+          stackId="a"
+          fill={SECONDARY}
+          radius={hasOther ? undefined : [3, 3, 0, 0]}
+          maxBarSize={22}
+        />
+        {hasOther && (
+          <Bar
+            dataKey="Other"
+            stackId="a"
+            fill="hsl(var(--muted-foreground))"
+            radius={[3, 3, 0, 0]}
+            maxBarSize={22}
+          />
+        )}
+        <Line
+          type="monotone"
+          dataKey="Building avg"
+          stroke="hsl(var(--warning))"
+          strokeWidth={2}
+          strokeDasharray="5 4"
+          dot={false}
+        />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }
@@ -647,7 +734,17 @@ export function AdminLiveData() {
       )}
 
       {active && (
-        <FlatDetailModal flat={active} onClose={() => setActive(null)} />
+        <FlatDetailModal
+          flat={active}
+          dates={data.range.dates}
+          avgByDate={Object.fromEntries(
+            totalsByDate.map((t) => [
+              t.date,
+              data.flatCount ? t.total / data.flatCount : 0,
+            ])
+          )}
+          onClose={() => setActive(null)}
+        />
       )}
     </div>
   );
@@ -657,9 +754,13 @@ export function AdminLiveData() {
 
 function FlatDetailModal({
   flat,
+  dates,
+  avgByDate,
   onClose,
 }: {
   flat: FlatData;
+  dates: string[];
+  avgByDate: Record<string, number>;
   onClose: () => void;
 }) {
   React.useEffect(() => {
@@ -695,6 +796,13 @@ function FlatDetailModal({
         </div>
 
         <div className="space-y-5 p-5">
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-foreground">
+              Day-wise consumption vs building average
+            </p>
+            <FlatDailyChart flat={flat} dates={dates} avgByDate={avgByDate} />
+          </div>
+
           {flat.meters.map((m) => (
             <MeterDetail key={m.deviceId} meter={m} />
           ))}
