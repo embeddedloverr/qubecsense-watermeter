@@ -19,3 +19,6 @@ _npm-install.log
 # Seeded resident credentials — never commit
 resident-credentials-*.csv
 tsconfig.tsbuildinfo
+
+# Guide build artefacts (the PDF itself is committed)
+guide-preview.png

@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
-    "reset:residents": "node scripts/reset-resident-passwords.mjs"
+    "reset:residents": "node scripts/reset-resident-passwords.mjs",
+    "guide": "node scripts/make-resident-guide.mjs"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -33,6 +34,7 @@
     "autoprefixer": "^10.4.20",
     "dotenv": "^16.4.5",
     "postcss": "^8.4.49",
+    "puppeteer-core": "^25.3.0",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
   }

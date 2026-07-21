@@ -181,6 +181,29 @@ Every reset account is flagged to change its password again on next login.
 The default deliberately skips residents who already set their own password,
 so re-issuing does not lock out people who are already using the app.
 
+## 📖 Resident guide (PDF)
+
+`QubecSense-Resident-Guide.pdf` in the project root is a ready-to-hand-out
+SOP for residents: first sign-in, setting their own password, and every
+section of their dashboard explained in plain language with screenshots.
+
+To regenerate it after UI changes — the dev server must be running:
+
+```bash
+npm run dev                                   # in one terminal
+BASE_URL=http://localhost:3000 npm run guide  # in another
+```
+
+It drives a real browser (via `puppeteer-core`, using the Chrome/Edge
+already installed — set `CHROME_PATH` if it isn't found), creates a
+throwaway resident account, walks the first-login journey, screenshots each
+screen, then deletes the account.
+
+Screenshots are anonymised — the sample flat and owner name replace the real
+ones, and the script **aborts** if any real detail is still visible, so the
+guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
+`guide-preview.png` of the whole document.
+
 ## 🔁 Re-seeding / updating flats
 
 `npm run seed` is **idempotent** — it upserts flats (won't duplicate) and only
