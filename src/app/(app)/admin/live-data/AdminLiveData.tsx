@@ -90,6 +90,23 @@ function latestFlags(m: Meter): string[] {
   return r ? [...r.alerts, ...r.status] : [];
 }
 
+/**
+ * Latest totalizer (lifetime meter reading) across a group of meters.
+ * Returns null when none of them has reported a totalizer.
+ */
+function latestTotalizer(meters: Meter[]): number | null {
+  let sum = 0;
+  let found = false;
+  for (const m of meters) {
+    const r = latestReading(m);
+    if (r && typeof r.totalizerLitres === "number") {
+      sum += r.totalizerLitres;
+      found = true;
+    }
+  }
+  return found ? sum : null;
+}
+
 const ALERT_LABELS: Record<string, string> = {
   EmptyPipe: "Empty pipe",
   NoConsumption: "No consumption",
@@ -848,6 +865,7 @@ export function AdminLiveData() {
                   <th className="px-5 py-3 font-medium">Bathroom</th>
                   <th className="px-5 py-3 font-medium">Total · {days}d</th>
                   <th className="px-5 py-3 font-medium">Latest day</th>
+                  <th className="px-5 py-3 font-medium">Totalizer</th>
                   <th className="px-5 py-3 font-medium">Alerts</th>
                   <th className="px-5 py-3" />
                 </tr>
@@ -874,6 +892,11 @@ export function AdminLiveData() {
                   const latest = data.range?.to
                     ? f.consumptionByDate[data.range.to] || 0
                     : 0;
+                  // Lifetime meter readings, kept per location so they can be
+                  // checked against the physical meters.
+                  const kitchenTotalizer = latestTotalizer(kitchen);
+                  const bathroomTotalizer = latestTotalizer(bathroom);
+                  const otherTotalizer = latestTotalizer(other);
                   return (
                     <tr key={f.flat} className="hover:bg-muted/40">
                       <td className="tabular px-5 py-3 font-semibold">{f.flat}</td>
@@ -896,6 +919,31 @@ export function AdminLiveData() {
                       </td>
                       <td className="tabular px-5 py-3 text-muted-foreground">
                         {litres(latest)}
+                      </td>
+                      <td className="tabular whitespace-nowrap px-5 py-3 text-xs text-muted-foreground">
+                        {kitchenTotalizer === null &&
+                        bathroomTotalizer === null &&
+                        otherTotalizer === null ? (
+                          "—"
+                        ) : (
+                          <span className="leading-tight">
+                            {kitchenTotalizer !== null && (
+                              <span className="block">
+                                K {litres(kitchenTotalizer)}
+                              </span>
+                            )}
+                            {bathroomTotalizer !== null && (
+                              <span className="block">
+                                B {litres(bathroomTotalizer)}
+                              </span>
+                            )}
+                            {otherTotalizer !== null && (
+                              <span className="block">
+                                O {litres(otherTotalizer)}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-3">
                         {flags.length === 0 ? (
