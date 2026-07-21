@@ -15,12 +15,14 @@ import {
   IconLogout,
   IconGauge,
   IconRupee,
+  IconDroplet,
+  IconPen,
 } from "./icons";
 
 export interface NavUser {
   name: string;
   email: string;
-  role: "admin" | "technician";
+  role: "admin" | "technician" | "resident";
 }
 
 interface NavItem {
@@ -43,6 +45,11 @@ const adminNav: NavItem[] = [
   { href: "/admin/technicians", label: "Team", icon: IconUsers },
 ];
 
+const residentNav: NavItem[] = [
+  { href: "/resident", label: "My Water", icon: IconDroplet },
+  { href: "/change-password", label: "Password", icon: IconPen },
+];
+
 export function AppShell({
   user,
   children,
@@ -52,10 +59,19 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const nav = user.role === "admin" ? adminNav : techNav;
+  const nav =
+    user.role === "admin"
+      ? adminNav
+      : user.role === "resident"
+        ? residentNav
+        : techNav;
 
   const isActive = (href: string) =>
-    pathname === href || (href !== "/admin" && href !== "/technician" && pathname.startsWith(href));
+    pathname === href ||
+    (href !== "/admin" &&
+      href !== "/technician" &&
+      href !== "/resident" &&
+      pathname.startsWith(href));
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });

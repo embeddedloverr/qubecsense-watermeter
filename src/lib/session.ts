@@ -4,13 +4,19 @@ import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE = "qs_session";
 
-export type Role = "admin" | "technician";
+export type Role = "admin" | "technician" | "resident";
 
 export interface SessionPayload {
   sub: string;
   name: string;
   email: string;
   role: Role;
+  /** Resident login handle, e.g. "rosalyn_501". */
+  username?: string;
+  /** Resident's flat number. */
+  flat?: string;
+  /** True while the user still has a seeded password to replace. */
+  mustChange?: boolean;
 }
 
 function getSecret(): Uint8Array {
@@ -37,8 +43,11 @@ export async function verifySessionToken(
     return {
       sub: String(payload.sub),
       name: String(payload.name),
-      email: String(payload.email),
+      email: String(payload.email ?? ""),
       role: payload.role as Role,
+      username: payload.username ? String(payload.username) : undefined,
+      flat: payload.flat ? String(payload.flat) : undefined,
+      mustChange: payload.mustChange === true,
     };
   } catch {
     return null;

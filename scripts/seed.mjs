@@ -1,9 +1,12 @@
-// Seed script: imports flats and creates the initial admin + technician users.
+// Seed script: imports flats, creates the admin + technician users, and
+// creates one resident login per flat (username "rosalyn_<flat>") with a
+// random one-time password that must be changed on first login.
 // Run with:  npm run seed
 import "dotenv/config";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { randomInt } from "node:crypto";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
@@ -15,6 +18,9 @@ const {
   SEED_ADMIN_PASSWORD = "admin123",
   SEED_TECH_EMAIL = "tech@qubecsense.com",
   SEED_TECH_PASSWORD = "tech123",
+  // Prefix for resident usernames + password length.
+  RESIDENT_USERNAME_PREFIX = "rosalyn",
+  RESIDENT_PASSWORD_LENGTH = "10",
 } = process.env;
 
 if (!MONGODB_URI) {
@@ -25,11 +31,18 @@ if (!MONGODB_URI) {
 const UserSchema = new mongoose.Schema(
   {
     name: String,
-    email: { type: String, unique: true, lowercase: true },
+    username: { type: String, unique: true, sparse: true, lowercase: true },
+    email: { type: String, unique: true, sparse: true, lowercase: true },
     passwordHash: String,
-    role: { type: String, enum: ["admin", "technician"], default: "technician" },
+    role: {
+      type: String,
+      enum: ["admin", "technician", "resident"],
+      default: "technician",
+    },
+    flatNumber: { type: String, index: true },
     phone: String,
     active: { type: Boolean, default: true },
+    mustChangePassword: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
@@ -49,7 +62,15 @@ const FlatSchema = new mongoose.Schema(
 const User = mongoose.models.User || mongoose.model("User", UserSchema);
 const Flat = mongoose.models.Flat || mongoose.model("Flat", FlatSchema);
 
-async function upsertUser(name, email, password, role, phone = "") {
+// Unambiguous alphabet (no 0/O/1/l/I) for readable one-time passwords.
+const PW_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function randomPassword(len) {
+  let out = "";
+  for (let i = 0; i < len; i++) out += PW_ALPHABET[randomInt(PW_ALPHABET.length)];
+  return out;
+}
+
+async function upsertStaff(name, email, password, role, phone = "") {
   const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {
     console.log(`• ${role} already exists: ${email}`);
@@ -62,6 +83,7 @@ async function upsertUser(name, email, password, role, phone = "") {
     role,
     phone,
     active: true,
+    mustChangePassword: false,
   });
   console.log(`✓ Created ${role}: ${email} / ${password}`);
 }
@@ -70,13 +92,16 @@ async function main() {
   console.log("→ Connecting to MongoDB…");
   await mongoose.connect(MONGODB_URI);
 
+  // Align indexes with the schema (converts the old non-sparse email index
+  // to a sparse one so residents without an email don't collide).
+  await User.syncIndexes();
+
   // --- Flats ---
   const flats = JSON.parse(
     readFileSync(join(__dirname, "..", "src", "data", "flats.json"), "utf8")
   );
 
-  let created = 0;
-  const ops = flats.map((f) => {
+  const flatOps = flats.map((f) => {
     const floor = Math.floor(parseInt(f.flatNumber, 10) / 100) || 0;
     return {
       updateOne: {
@@ -95,32 +120,77 @@ async function main() {
       },
     };
   });
-  const res = await Flat.bulkWrite(ops);
-  created = res.upsertedCount ?? 0;
+  const flatRes = await Flat.bulkWrite(flatOps);
+  const newFlats = flatRes.upsertedCount ?? 0;
   console.log(
-    `✓ Flats synced: ${flats.length} total (${created} new, ${
-      flats.length - created
+    `✓ Flats synced: ${flats.length} total (${newFlats} new, ${
+      flats.length - newFlats
     } updated).`
   );
 
-  // --- Users ---
-  await upsertUser(
-    "QubecSense Admin",
-    SEED_ADMIN_EMAIL,
-    SEED_ADMIN_PASSWORD,
-    "admin"
+  // --- Staff users ---
+  await upsertStaff("QubecSense Admin", SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, "admin");
+  await upsertStaff("Field Technician", SEED_TECH_EMAIL, SEED_TECH_PASSWORD, "technician");
+
+  // --- Resident users (one per flat) ---
+  const pwLen = Math.max(6, parseInt(RESIDENT_PASSWORD_LENGTH, 10) || 10);
+  const created = [];
+  let skipped = 0;
+
+  for (const f of flats) {
+    const flatNumber = String(f.flatNumber);
+    const username = `${RESIDENT_USERNAME_PREFIX}_${flatNumber}`.toLowerCase();
+
+    const existing = await User.findOne({ username });
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    const password = randomPassword(pwLen);
+    await User.create({
+      name: f.ownerName || `Flat ${flatNumber}`,
+      username,
+      passwordHash: await bcrypt.hash(password, 10),
+      role: "resident",
+      flatNumber,
+      phone: f.ownerPhone || "",
+      active: true,
+      mustChangePassword: true,
+    });
+    created.push({
+      flat: flatNumber,
+      username,
+      password,
+      name: f.ownerName || "",
+    });
+  }
+
+  console.log(
+    `✓ Resident logins: ${created.length} created, ${skipped} already existed.`
   );
-  await upsertUser(
-    "Field Technician",
-    SEED_TECH_EMAIL,
-    SEED_TECH_PASSWORD,
-    "technician"
-  );
+
+  // --- Write the new credentials to a CSV so the admin can hand them out ---
+  if (created.length) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const csvPath = join(__dirname, "..", `resident-credentials-${stamp}.csv`);
+    const header = "Flat,Username,Password,Owner\n";
+    const body = created
+      .map(
+        (c) =>
+          `"${c.flat}","${c.username}","${c.password}","${(c.name || "").replace(/"/g, '""')}"`
+      )
+      .join("\n");
+    writeFileSync(csvPath, header + body + "\n", "utf8");
+    console.log(`✓ Wrote credentials to: ${csvPath}`);
+    console.log("  Distribute these to residents; each must change it on first login.");
+  }
 
   console.log("\n✅ Seed complete.\n");
   console.log("   Admin login:      ", SEED_ADMIN_EMAIL, "/", SEED_ADMIN_PASSWORD);
   console.log("   Technician login: ", SEED_TECH_EMAIL, "/", SEED_TECH_PASSWORD);
-  console.log("\n   Change these passwords after first login.\n");
+  console.log(`   Resident logins:   ${RESIDENT_USERNAME_PREFIX}_<flat>  (see the CSV)`);
+  console.log("\n   Change the seeded staff passwords after first login.\n");
 
   await mongoose.disconnect();
   process.exit(0);

@@ -38,3 +38,10 @@ export function floorOf(flatNumber: string): number {
   if (Number.isNaN(n)) return 0;
   return Math.floor(n / 100);
 }
+
+/** Landing route for a role after login / password change. */
+export function homeFor(role: string): string {
+  if (role === "admin") return "/admin/live-data";
+  if (role === "resident") return "/resident";
+  return "/technician";
+}

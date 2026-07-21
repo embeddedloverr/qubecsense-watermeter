@@ -1,18 +1,18 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { LoginForm } from "./LoginForm";
 import { Logo } from "@/components/Logo";
-import { homeFor } from "@/lib/utils";
+import { ChangePasswordForm } from "./ChangePasswordForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+export default async function ChangePasswordPage() {
   const session = await getSession();
-  if (session) redirect(session.mustChange ? "/change-password" : homeFor(session.role));
+  if (!session) redirect("/login");
+
+  const forced = session.mustChange === true;
 
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10">
-      {/* Ambient water-themed backdrop */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -25,16 +25,15 @@ export default async function LoginPage() {
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo size={52} showText={false} />
           <h1 className="mt-4 text-2xl font-bold tracking-tight text-foreground">
-            QubecSense
+            {forced ? "Set your password" : "Change password"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Water Meter Installation Portal
+            {forced
+              ? "Choose a new password to finish setting up your account."
+              : `Signed in as ${session.username || session.email}`}
           </p>
         </div>
-        <LoginForm />
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Technician &amp; admin access · Authorised personnel only
-        </p>
+        <ChangePasswordForm forced={forced} />
       </div>
     </div>
   );

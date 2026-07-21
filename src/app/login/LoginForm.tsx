@@ -11,11 +11,12 @@ import {
   FieldError,
 } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
+import { homeFor } from "@/lib/utils";
 
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [email, setEmail] = React.useState("");
+  const [identifier, setIdentifier] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [show, setShow] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -29,7 +30,7 @@ export function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -37,13 +38,17 @@ export function LoginForm() {
         setLoading(false);
         return;
       }
+      // Force a password reset for seeded accounts before anything else.
+      if (data.user.mustChangePassword) {
+        router.replace("/change-password");
+        router.refresh();
+        return;
+      }
       const from = params.get("from");
       const dest =
         from && !from.startsWith("/login")
           ? from
-          : data.user.role === "admin"
-            ? "/admin/live-data"
-            : "/technician";
+          : homeFor(data.user.role);
       router.replace(dest);
       router.refresh();
     } catch {
@@ -67,17 +72,18 @@ export function LoginForm() {
           )}
 
           <div>
-            <Label htmlFor="email" required>
-              Email
+            <Label htmlFor="identifier" required>
+              Email or username
             </Label>
             <Input
-              id="email"
-              type="email"
+              id="identifier"
+              type="text"
               autoComplete="username"
-              inputMode="email"
-              placeholder="you@qubecsense.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="you@qubecsense.com or rosalyn_501"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
               required
             />
           </div>

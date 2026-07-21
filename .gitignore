@@ -15,3 +15,7 @@ public/fallback-*.js
 node_modules/
 _dev.log
 _npm-install.log
+
+# Seeded resident credentials — never commit
+resident-credentials-*.csv
+tsconfig.tsbuildinfo

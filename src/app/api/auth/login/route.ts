@@ -11,18 +11,23 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
+    const body = await req.json();
+    // Accept "identifier" (email or username); fall back to "email" for older clients.
+    const identifier = String(body.identifier ?? body.email ?? "")
+      .toLowerCase()
+      .trim();
+    const password = body.password;
 
-    if (!email || !password) {
+    if (!identifier || !password) {
       return NextResponse.json(
-        { error: "Email and password are required." },
+        { error: "Username/email and password are required." },
         { status: 400 }
       );
     }
 
     await connectDB();
     const user = await User.findOne({
-      email: String(email).toLowerCase().trim(),
+      $or: [{ email: identifier }, { username: identifier }],
     });
 
     if (!user || !user.active) {
@@ -35,7 +40,7 @@ export async function POST(req: NextRequest) {
     const ok = await verifyPassword(password, user.passwordHash);
     if (!ok) {
       return NextResponse.json(
-        { error: "Invalid email or password." },
+        { error: "Invalid username/email or password." },
         { status: 401 }
       );
     }
@@ -43,8 +48,11 @@ export async function POST(req: NextRequest) {
     const token = await createSessionToken({
       sub: user._id.toString(),
       name: user.name,
-      email: user.email,
+      email: user.email || "",
       role: user.role,
+      username: user.username || undefined,
+      flat: user.flatNumber || undefined,
+      mustChange: user.mustChangePassword === true,
     });
     setSessionCookie(token);
 
@@ -52,8 +60,10 @@ export async function POST(req: NextRequest) {
       user: {
         id: user._id.toString(),
         name: user.name,
-        email: user.email,
+        email: user.email || "",
+        username: user.username || "",
         role: user.role,
+        mustChangePassword: user.mustChangePassword === true,
       },
     });
   } catch (err) {
