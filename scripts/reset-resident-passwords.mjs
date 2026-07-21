@@ -54,11 +54,22 @@ const UserSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model("User", UserSchema);
 
-const PW_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+// Unambiguous alphabet (no 0/O/1/l/I), guaranteed to include a lower case
+// letter, a capital and a digit so it meets the password policy.
+const PW_LOWER = "abcdefghjkmnpqrstuvwxyz";
+const PW_UPPER = "ABCDEFGHJKMNPQRSTUVWXYZ";
+const PW_DIGITS = "23456789";
+const PW_ALL = PW_LOWER + PW_UPPER + PW_DIGITS;
+
 function randomPassword(len) {
-  let out = "";
-  for (let i = 0; i < len; i++) out += PW_ALPHABET[randomInt(PW_ALPHABET.length)];
-  return out;
+  const pick = (set) => set[randomInt(set.length)];
+  const chars = [pick(PW_LOWER), pick(PW_UPPER), pick(PW_DIGITS)];
+  while (chars.length < len) chars.push(pick(PW_ALL));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
 }
 
 async function main() {
@@ -79,7 +90,7 @@ async function main() {
     process.exit(0);
   }
 
-  const pwLen = Math.max(6, parseInt(RESIDENT_PASSWORD_LENGTH, 10) || 10);
+  const pwLen = Math.max(8, parseInt(RESIDENT_PASSWORD_LENGTH, 10) || 10);
   const rows = [];
 
   for (const user of residents) {

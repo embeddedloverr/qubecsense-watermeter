@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { getSession, hashPassword } from "@/lib/auth";
+import { validatePassword } from "@/lib/password";
 
 export const runtime = "nodejs";
 
@@ -40,11 +41,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (String(password).length < 6) {
-      return NextResponse.json(
-        { error: "Password must be at least 6 characters." },
-        { status: 400 }
-      );
+    const invalid = validatePassword(String(password), { email, name });
+    if (invalid) {
+      return NextResponse.json({ error: invalid }, { status: 400 });
     }
 
     await connectDB();

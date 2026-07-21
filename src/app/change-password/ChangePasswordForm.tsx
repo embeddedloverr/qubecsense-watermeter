@@ -10,8 +10,13 @@ import {
   Label,
   FieldError,
 } from "@/components/ui";
-import { IconAlert } from "@/components/icons";
+import { IconAlert, IconCheck, IconX } from "@/components/icons";
 import { homeFor } from "@/lib/utils";
+import {
+  passwordChecklist,
+  validatePassword,
+  PASSWORD_MIN_LENGTH,
+} from "@/lib/password";
 
 export function ChangePasswordForm({ forced }: { forced: boolean }) {
   const router = useRouter();
@@ -23,13 +28,17 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
   const [fieldError, setFieldError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
+  const checklist = passwordChecklist(next);
+  const meetsPolicy = checklist.every((c) => !c.required || c.ok);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setFieldError("");
 
-    if (next.length < 6) {
-      setFieldError("Password must be at least 6 characters.");
+    const invalid = validatePassword(next);
+    if (invalid) {
+      setFieldError(invalid);
       return;
     }
     if (next !== confirm) {
@@ -107,7 +116,7 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
                 id="new"
                 type={show ? "text" : "password"}
                 autoComplete="new-password"
-                placeholder="At least 6 characters"
+                placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
                 value={next}
                 onChange={(e) => setNext(e.target.value)}
                 required
@@ -121,6 +130,29 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
                 {show ? "Hide" : "Show"}
               </button>
             </div>
+
+            {/* Live policy checklist */}
+            <ul className="mt-2.5 space-y-1" aria-live="polite">
+              {checklist.map((c) => (
+                <li
+                  key={c.id}
+                  className={`flex items-center gap-1.5 text-xs ${
+                    c.ok
+                      ? "text-success"
+                      : c.required
+                        ? "text-muted-foreground"
+                        : "text-muted-foreground/70"
+                  }`}
+                >
+                  {c.ok ? (
+                    <IconCheck className="h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <IconX className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  )}
+                  <span>{c.label}</span>
+                </li>
+              ))}
+            </ul>
           </div>
 
           <div>
@@ -139,7 +171,13 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
             <FieldError>{fieldError}</FieldError>
           </div>
 
-          <Button type="submit" size="lg" loading={loading} className="w-full">
+          <Button
+            type="submit"
+            size="lg"
+            loading={loading}
+            disabled={!meetsPolicy || !confirm}
+            className="w-full"
+          >
             {loading ? "Saving…" : "Save new password"}
           </Button>
 

@@ -7,12 +7,23 @@ import { getSession, hashPassword } from "@/lib/auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Unambiguous alphabet (no 0/O/1/l/I), same as the seed script.
-const PW_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+// Unambiguous alphabet (no 0/O/1/l/I), same as the seed script. The result is
+// guaranteed to contain a lower case letter, a capital and a digit so it
+// satisfies the same policy residents must meet when they choose their own.
+const PW_LOWER = "abcdefghjkmnpqrstuvwxyz";
+const PW_UPPER = "ABCDEFGHJKMNPQRSTUVWXYZ";
+const PW_DIGITS = "23456789";
+const PW_ALL = PW_LOWER + PW_UPPER + PW_DIGITS;
+
 function randomPassword(len = 10) {
-  let out = "";
-  for (let i = 0; i < len; i++) out += PW_ALPHABET[randomInt(PW_ALPHABET.length)];
-  return out;
+  const pick = (set: string) => set[randomInt(set.length)];
+  const chars = [pick(PW_LOWER), pick(PW_UPPER), pick(PW_DIGITS)];
+  while (chars.length < len) chars.push(pick(PW_ALL));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
 }
 
 async function requireAdmin() {

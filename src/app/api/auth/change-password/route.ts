@@ -8,6 +8,7 @@ import {
   createSessionToken,
   setSessionCookie,
 } from "@/lib/auth";
+import { validatePassword } from "@/lib/password";
 
 export const runtime = "nodejs";
 
@@ -20,17 +21,22 @@ export async function POST(req: NextRequest) {
   try {
     const { currentPassword, newPassword } = await req.json();
 
-    if (!newPassword || String(newPassword).length < 6) {
-      return NextResponse.json(
-        { error: "New password must be at least 6 characters." },
-        { status: 400 }
-      );
-    }
-
     await connectDB();
     const user = await User.findById(session.sub);
     if (!user || !user.active) {
       return NextResponse.json({ error: "Account not found." }, { status: 404 });
+    }
+
+    // Enforce the password policy against the account's own details, so
+    // people can't reuse their username or flat number.
+    const invalid = validatePassword(newPassword, {
+      username: user.username,
+      flatNumber: user.flatNumber,
+      name: user.name,
+      email: user.email,
+    });
+    if (invalid) {
+      return NextResponse.json({ error: invalid }, { status: 400 });
     }
 
     // On a forced first-login change the user already authenticated with the

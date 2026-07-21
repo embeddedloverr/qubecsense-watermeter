@@ -43,7 +43,7 @@ const CHROME_CANDIDATES = [
 
 const DEMO_USERNAME = "guide_demo_account";
 const DEMO_PASSWORD = "Kp7uEXAMPLE";
-const DEMO_NEW_PASSWORD = "MyNewPass123";
+const DEMO_NEW_PASSWORD = "Monsoon7Tap";
 
 // Sample values shown in the screenshots instead of real resident details.
 const SAMPLE_FLAT = "101";
@@ -384,10 +384,17 @@ function buildHtml(s) {
     <div class="text">
       <p>The first time you sign in, you must replace the one-time password with your own. This screen appears automatically.</p>
       <ol>
-        <li>Type a new password — at least <strong>6 characters</strong>.</li>
+        <li>Type a new password. It must have <strong>at least 8 characters</strong>,
+            including <strong>one capital letter</strong>, <strong>one small
+            letter</strong> and <strong>one number</strong>.</li>
         <li>Type the same password again to confirm.</li>
         <li>Tap <strong>Save new password</strong>.</li>
       </ol>
+      <p>The tick list under the box turns green as each requirement is met.
+         Adding a symbol such as <strong>!</strong> or <strong>@</strong> makes
+         it stronger still.</p>
+      <div class="note"><strong>Avoid:</strong> your flat number, your username,
+        and easy runs like <em>1234</em> or <em>abcd</em> — these are not accepted.</div>
       <p>You go straight to your dashboard. From then on, sign in with your <em>new</em> password.</p>
       <div class="warn"><strong>Please note:</strong> the one-time password stops working once you set your own. Choose something you will remember.</div>
       <div class="note">Nobody at the society can see your password — if you forget it, the office issues a fresh one-time password.</div>
