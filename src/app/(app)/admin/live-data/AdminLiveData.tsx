@@ -106,6 +106,18 @@ const ALERT_LABELS: Record<string, string> = {
 
 const STATUS_KEYS = new Set(["BadTemp", "LowBat", "Motion", "AirBubbles"]);
 
+/** Sentinel for the "any alert" filter chip. */
+const ANY_ALERT = "__any__";
+
+type SortKey = "flat" | "total" | "latest" | "alerts";
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "flat", label: "Flat no." },
+  { key: "total", label: "Highest total" },
+  { key: "latest", label: "Highest latest day" },
+  { key: "alerts", label: "Most alerts" },
+];
+
 function FlagBadge({ flag }: { flag: string }) {
   return (
     <Badge tone={STATUS_KEYS.has(flag) ? "warning" : "destructive"}>
@@ -276,6 +288,134 @@ function FlatDailyChart({
   );
 }
 
+/* ------------------------------- Filter chip -------------------------------- */
+
+function Chip({
+  label,
+  active,
+  onClick,
+  tone = "neutral",
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  tone?: "neutral" | "warning" | "destructive";
+}) {
+  const activeClass = {
+    neutral: "bg-primary text-primary-foreground",
+    warning: "bg-warning text-warning-foreground",
+    destructive: "bg-destructive text-destructive-foreground",
+  }[tone];
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? activeClass
+          : "bg-muted text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ------------------------------ Silent meters ------------------------------- */
+
+interface SilentMeter {
+  flat: string | null;
+  deviceId: string;
+  registrationId: string | null;
+  location: string | null;
+  lastSeen: string;
+  daysSince: number;
+  ownerName?: string;
+  ownerPhone?: string;
+}
+
+/** Meters that were reporting but have stopped — flat batteries, lost signal. */
+function SilentMeters() {
+  const [silent, setSilent] = React.useState<SilentMeter[] | null>(null);
+  const [latestDate, setLatestDate] = React.useState<string | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/live-data/silent?window=30", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled || d.error) return;
+        setSilent(d.silent || []);
+        setLatestDate(d.latestDate || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!silent || silent.length === 0) return null;
+
+  const shown = expanded ? silent : silent.slice(0, 5);
+
+  return (
+    <Card className="border-warning/40">
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <IconAlert className="h-4 w-4 text-warning" />
+            {silent.length} meter{silent.length === 1 ? "" : "s"} stopped
+            reporting
+          </CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Last reading is older than the newest day
+            {latestDate ? ` (${formatDate(latestDate)})` : ""} — check battery
+            or connectivity.
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="px-0 pb-0">
+        <ul className="divide-y divide-border border-t border-border">
+          {shown.map((m) => (
+            <li
+              key={m.deviceId}
+              className="flex items-center justify-between gap-3 px-5 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="tabular text-sm font-medium text-foreground">
+                  {m.flat ? `Flat ${m.flat}` : "Unassigned"}
+                  {m.location ? ` · ${m.location}` : ""}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {m.ownerName ? `${m.ownerName} · ` : ""}
+                  {m.deviceId}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <Badge tone={m.daysSince >= 3 ? "destructive" : "warning"}>
+                  {m.daysSince}d silent
+                </Badge>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Last {formatDate(m.lastSeen)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {silent.length > 5 && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="w-full border-t border-border px-5 py-2.5 text-sm font-medium text-primary hover:bg-muted/40"
+          >
+            {expanded ? "Show less" : `Show all ${silent.length}`}
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /* --------------------------------- Stat card --------------------------------- */
 
 function StatCard({
@@ -326,6 +466,8 @@ export function AdminLiveData() {
   const [days, setDays] = React.useState(14);
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState<FlatData | null>(null);
+  const [alertFilter, setAlertFilter] = React.useState<string | null>(null);
+  const [sort, setSort] = React.useState<SortKey>("flat");
   const [updatedAt, setUpdatedAt] = React.useState<Date | null>(null);
 
   const load = React.useCallback(
@@ -361,16 +503,73 @@ export function AdminLiveData() {
     return () => clearInterval(id);
   }, [load]);
 
+  /** Alert/status flags present across the loaded flats, for the filter chips. */
+  const availableFlags = React.useMemo(() => {
+    if (!data) return [];
+    const counts = new Map<string, number>();
+    for (const f of data.flats) {
+      for (const flag of new Set(f.meters.flatMap((m) => latestFlags(m)))) {
+        counts.set(flag, (counts.get(flag) || 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [data]);
+
   const filteredFlats = React.useMemo(() => {
     if (!data) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return data.flats;
-    return data.flats.filter(
-      (f) =>
-        f.flat.toLowerCase().includes(q) ||
-        (f.ownerName || "").toLowerCase().includes(q)
-    );
-  }, [data, query]);
+
+    const rows = data.flats.filter((f) => {
+      if (q) {
+        const hit =
+          f.flat.toLowerCase().includes(q) ||
+          (f.ownerName || "").toLowerCase().includes(q);
+        if (!hit) return false;
+      }
+      if (alertFilter) {
+        const flags = new Set(f.meters.flatMap((m) => latestFlags(m)));
+        if (alertFilter === ANY_ALERT) {
+          // "Any alert" means a real alert, not just a status flag.
+          const hasAlert = f.meters.some(
+            (m) => latestReading(m)?.alerts?.length
+          );
+          if (!hasAlert) return false;
+        } else if (!flags.has(alertFilter)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const latestDate = data.range?.to || "";
+    const alertCount = (f: FlatData) =>
+      new Set(f.meters.flatMap((m) => latestFlags(m))).size;
+
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      switch (sort) {
+        case "total":
+          return b.totalConsumptionLitres - a.totalConsumptionLitres;
+        case "latest":
+          return (
+            (b.consumptionByDate[latestDate] || 0) -
+            (a.consumptionByDate[latestDate] || 0)
+          );
+        case "alerts":
+          return alertCount(b) - alertCount(a);
+        case "flat":
+        default: {
+          const na = parseInt(a.flat, 10);
+          const nb = parseInt(b.flat, 10);
+          if (Number.isNaN(na) || Number.isNaN(nb)) {
+            return String(a.flat).localeCompare(String(b.flat));
+          }
+          return na - nb;
+        }
+      }
+    });
+    return sorted;
+  }, [data, query, alertFilter, sort]);
 
   const totalsByDate = React.useMemo(() => {
     if (!data?.range) return [];
@@ -519,6 +718,52 @@ export function AdminLiveData() {
           Export CSV
         </Button>
       </div>
+
+      {/* Alert filters + sort */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Chip
+            label="All flats"
+            active={alertFilter === null}
+            onClick={() => setAlertFilter(null)}
+          />
+          <Chip
+            label="Any alert"
+            active={alertFilter === ANY_ALERT}
+            onClick={() =>
+              setAlertFilter(alertFilter === ANY_ALERT ? null : ANY_ALERT)
+            }
+            tone="destructive"
+          />
+          {availableFlags.map(([flag, count]) => (
+            <Chip
+              key={flag}
+              label={`${ALERT_LABELS[flag] || flag} · ${count}`}
+              active={alertFilter === flag}
+              onClick={() => setAlertFilter(alertFilter === flag ? null : flag)}
+              tone={STATUS_KEYS.has(flag) ? "warning" : "destructive"}
+            />
+          ))}
+        </div>
+        <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          Sort
+          <Select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="h-9 w-auto text-sm"
+            aria-label="Sort flats"
+          >
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+      </div>
+
+      {/* Silent meters */}
+      <SilentMeters />
 
       {/* Meta line */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

@@ -42,6 +42,7 @@ const adminNav: NavItem[] = [
   { href: "/admin", label: "Overview", icon: IconDashboard },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
   { href: "/admin/installations", label: "Records", icon: IconHome },
+  { href: "/admin/residents", label: "Residents", icon: IconUsers },
   { href: "/admin/technicians", label: "Team", icon: IconUsers },
 ];
 

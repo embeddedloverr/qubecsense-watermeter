@@ -17,6 +17,8 @@ export interface IUser {
   active: boolean;
   /** True until the user sets their own password on first login. */
   mustChangePassword: boolean;
+  /** Last successful sign-in; unset means the account has never been used. */
+  lastLoginAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +50,7 @@ const UserSchema = new Schema<IUser>(
     phone: { type: String, trim: true },
     active: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
+    lastLoginAt: { type: Date },
   },
   { timestamps: true }
 );

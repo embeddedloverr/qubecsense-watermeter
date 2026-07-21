@@ -45,6 +45,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Record the sign-in (best-effort; never block login on this).
+    User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } })
+      .exec()
+      .catch((e) => console.error("lastLoginAt update failed", e));
+
     const token = await createSessionToken({
       sub: user._id.toString(),
       name: user.name,
