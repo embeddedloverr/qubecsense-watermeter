@@ -33,6 +33,7 @@ import {
   IconAlert,
 } from "@/components/icons";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { ExportDialog } from "./ExportDialog";
 
 /* ----------------------------- API response types ---------------------------- */
 
@@ -468,6 +469,7 @@ export function AdminLiveData() {
   const [active, setActive] = React.useState<FlatData | null>(null);
   const [alertFilter, setAlertFilter] = React.useState<string | null>(null);
   const [sort, setSort] = React.useState<SortKey>("flat");
+  const [exporting, setExporting] = React.useState(false);
   const [updatedAt, setUpdatedAt] = React.useState<Date | null>(null);
 
   const load = React.useCallback(
@@ -715,7 +717,10 @@ export function AdminLiveData() {
           Refresh
         </Button>
         <Button variant="outline" size="md" onClick={exportCsv}>
-          Export CSV
+          Quick CSV
+        </Button>
+        <Button variant="outline" size="md" onClick={() => setExporting(true)}>
+          Export…
         </Button>
       </div>
 
@@ -994,6 +999,14 @@ export function AdminLiveData() {
             </ul>
           </CardContent>
         </Card>
+      )}
+
+      {exporting && (
+        <ExportDialog
+          defaultFrom={data.range.from || ""}
+          defaultTo={data.range.to || ""}
+          onClose={() => setExporting(false)}
+        />
       )}
 
       {active && (
