@@ -11,7 +11,12 @@ import {
   CartesianGrid,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { IconDroplet, IconGauge, IconRupee } from "@/components/icons";
+import {
+  IconDroplet,
+  IconGauge,
+  IconRupee,
+  IconChevronRight,
+} from "@/components/icons";
 import { formatDate } from "@/lib/utils";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
 
@@ -51,6 +56,189 @@ function ChartTooltip({ active, payload, label }: any) {
 
 function latestReading(m: LiveMeter) {
   return m.readings[m.readings.length - 1];
+}
+
+/* --------------------------------- History ---------------------------------- */
+
+interface DayHistory {
+  date: string;
+  total: number;
+  hours: number;
+  buckets: { label: string; Kitchen: number; Bathroom: number; Other: number }[];
+}
+
+/** Per-day breakdown into the meter's intraday buckets (12 × 2 hours). */
+function buildHistory(flat: LiveFlat, dates: string[]): DayHistory[] {
+  const out: DayHistory[] = [];
+
+  // Newest day first.
+  for (const date of [...dates].sort((a, b) => b.localeCompare(a))) {
+    const entries = flat.meters
+      .map((m) => ({ meter: m, reading: m.readings.find((x) => x.date === date) }))
+      .filter((e) => e.reading);
+    if (!entries.length) continue;
+
+    const total = entries.reduce(
+      (a, e) => a + (e.reading?.consumptionLitres || 0),
+      0
+    );
+    const bucketCount = Math.max(
+      ...entries.map((e) => e.reading?.intraday?.length || 0)
+    );
+    if (!bucketCount) continue;
+
+    const hours = 24 / bucketCount;
+    const buckets = Array.from({ length: bucketCount }, (_, i) => {
+      let kitchen = 0;
+      let bathroom = 0;
+      let other = 0;
+      for (const { meter, reading } of entries) {
+        const v = reading?.intraday?.[i] || 0;
+        const loc = (meter.location || "").toLowerCase();
+        if (loc === "kitchen") kitchen += v;
+        else if (loc === "bathroom") bathroom += v;
+        else other += v;
+      }
+      return {
+        label: `${String(Math.round(i * hours)).padStart(2, "0")}:00`,
+        Kitchen: kitchen,
+        Bathroom: bathroom,
+        Other: other,
+      };
+    });
+
+    out.push({ date, total, hours, buckets });
+  }
+
+  return out;
+}
+
+function HistorySection({
+  flat,
+  dates,
+}: {
+  flat: LiveFlat;
+  dates: string[];
+}) {
+  const history = React.useMemo(() => buildHistory(flat, dates), [flat, dates]);
+  // Newest day expanded by default.
+  const [open, setOpen] = React.useState<string | null>(history[0]?.date ?? null);
+
+  if (!history.length) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>History</CardTitle>
+        </CardHeader>
+        <CardContent className="pb-5 pt-0 text-sm text-muted-foreground">
+          No day-wise history yet.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>History</CardTitle>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Tap a day to see usage in {history[0].hours}-hour blocks.
+        </p>
+      </CardHeader>
+      <CardContent className="px-0 pb-0">
+        <ul className="divide-y divide-border border-t border-border">
+          {history.map((day) => {
+            const expanded = open === day.date;
+            const hasOther = day.buckets.some((b) => b.Other > 0);
+            return (
+              <li key={day.date}>
+                <button
+                  onClick={() => setOpen(expanded ? null : day.date)}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-muted/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <IconChevronRight
+                      className={`h-4 w-4 text-muted-foreground transition-transform ${
+                        expanded ? "rotate-90" : ""
+                      }`}
+                    />
+                    <span className="text-sm font-medium text-foreground">
+                      {formatDate(day.date)}
+                    </span>
+                  </div>
+                  <span className="tabular text-sm text-muted-foreground">
+                    {litres(day.total)}
+                  </span>
+                </button>
+
+                {expanded && (
+                  <div className="px-3 pb-4">
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart
+                        data={day.buckets}
+                        margin={{ top: 4, right: 8, left: -14, bottom: 0 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="hsl(var(--border))"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="label"
+                          tick={{
+                            fontSize: 10,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                          tickLine={false}
+                          axisLine={false}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis
+                          tick={{
+                            fontSize: 10,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <Tooltip
+                          content={<ChartTooltip />}
+                          cursor={{ fill: "hsl(var(--muted))" }}
+                        />
+                        <Bar
+                          dataKey="Kitchen"
+                          stackId="a"
+                          fill={PRIMARY}
+                          maxBarSize={18}
+                        />
+                        <Bar
+                          dataKey="Bathroom"
+                          stackId="a"
+                          fill={SECONDARY}
+                          radius={hasOther ? undefined : [3, 3, 0, 0]}
+                          maxBarSize={18}
+                        />
+                        {hasOther && (
+                          <Bar
+                            dataKey="Other"
+                            stackId="a"
+                            fill="hsl(var(--muted-foreground))"
+                            radius={[3, 3, 0, 0]}
+                            maxBarSize={18}
+                          />
+                        )}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
 }
 
 export function ResidentView({
@@ -235,6 +423,9 @@ export function ResidentView({
           </CardContent>
         </Card>
       )}
+
+      {/* Day-wise history with intraday detail */}
+      <HistorySection flat={flat} dates={dates} />
 
       {/* Per-meter detail */}
       <Card>
