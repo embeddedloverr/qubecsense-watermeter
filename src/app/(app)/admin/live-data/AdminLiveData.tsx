@@ -90,6 +90,38 @@ function latestFlags(m: Meter): string[] {
   return r ? [...r.alerts, ...r.status] : [];
 }
 
+/** Most recent delivery time across every reading of a flat, in epoch ms. */
+function latestReceivedAt(f: FlatData): number | null {
+  let max: number | null = null;
+  for (const m of f.meters) {
+    for (const r of m.readings) {
+      if (!r.receivedAt) continue;
+      const t = new Date(r.receivedAt).getTime();
+      if (!Number.isNaN(t) && (max === null || t > max)) max = t;
+    }
+  }
+  return max;
+}
+
+function timeAgo(ms: number): string {
+  const minutes = Math.floor((Date.now() - ms) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function shortDateTime(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
  * Latest totalizer (lifetime meter reading) across a group of meters.
  * Returns null when none of them has reported a totalizer.
@@ -127,13 +159,26 @@ const STATUS_KEYS = new Set(["BadTemp", "LowBat", "Motion", "AirBubbles"]);
 /** Sentinel for the "any alert" filter chip. */
 const ANY_ALERT = "__any__";
 
-type SortKey = "flat" | "total" | "latest" | "alerts";
+type SortKey = "flat" | "total" | "latest" | "alerts" | "received";
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "flat", label: "Flat no." },
   { key: "total", label: "Highest total" },
   { key: "latest", label: "Highest latest day" },
   { key: "alerts", label: "Most alerts" },
+  { key: "received", label: "Recently received" },
+];
+
+/** Freshness windows for the "received" filter, in hours. */
+type ReceivedKey = "any" | "1h" | "6h" | "12h" | "24h" | "stale";
+
+const RECEIVED_FILTERS: { key: ReceivedKey; label: string; hours?: number }[] = [
+  { key: "any", label: "Any time" },
+  { key: "1h", label: "Last hour", hours: 1 },
+  { key: "6h", label: "Last 6 hours", hours: 6 },
+  { key: "12h", label: "Last 12 hours", hours: 12 },
+  { key: "24h", label: "Last 24 hours", hours: 24 },
+  { key: "stale", label: "Over 24 hours ago", hours: 24 },
 ];
 
 function FlagBadge({ flag }: { flag: string }) {
@@ -486,6 +531,7 @@ export function AdminLiveData() {
   const [active, setActive] = React.useState<FlatData | null>(null);
   const [alertFilter, setAlertFilter] = React.useState<string | null>(null);
   const [sort, setSort] = React.useState<SortKey>("flat");
+  const [received, setReceived] = React.useState<ReceivedKey>("any");
   const [exporting, setExporting] = React.useState(false);
   const [updatedAt, setUpdatedAt] = React.useState<Date | null>(null);
 
@@ -557,6 +603,18 @@ export function AdminLiveData() {
           return false;
         }
       }
+      if (received !== "any") {
+        const rule = RECEIVED_FILTERS.find((r) => r.key === received);
+        const at = latestReceivedAt(f);
+        // A flat that never reported a delivery time can't satisfy a window.
+        if (at === null) return received === "stale";
+        const ageHours = (Date.now() - at) / 3_600_000;
+        if (received === "stale") {
+          if (ageHours <= (rule?.hours ?? 24)) return false;
+        } else if (ageHours > (rule?.hours ?? Infinity)) {
+          return false;
+        }
+      }
       return true;
     });
 
@@ -576,6 +634,8 @@ export function AdminLiveData() {
           );
         case "alerts":
           return alertCount(b) - alertCount(a);
+        case "received":
+          return (latestReceivedAt(b) ?? 0) - (latestReceivedAt(a) ?? 0);
         case "flat":
         default: {
           const na = parseInt(a.flat, 10);
@@ -588,7 +648,7 @@ export function AdminLiveData() {
       }
     });
     return sorted;
-  }, [data, query, alertFilter, sort]);
+  }, [data, query, alertFilter, sort, received]);
 
   const totalsByDate = React.useMemo(() => {
     if (!data?.range) return [];
@@ -768,6 +828,21 @@ export function AdminLiveData() {
           ))}
         </div>
         <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          Received
+          <Select
+            value={received}
+            onChange={(e) => setReceived(e.target.value as ReceivedKey)}
+            className="h-9 w-auto text-sm"
+            aria-label="Filter by when data was received"
+          >
+            {RECEIVED_FILTERS.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Sort
           <Select
             value={sort}
@@ -866,6 +941,7 @@ export function AdminLiveData() {
                   <th className="px-5 py-3 font-medium">Total · {days}d</th>
                   <th className="px-5 py-3 font-medium">Latest day</th>
                   <th className="px-5 py-3 font-medium">Totalizer</th>
+                  <th className="px-5 py-3 font-medium">Received</th>
                   <th className="px-5 py-3 font-medium">Alerts</th>
                   <th className="px-5 py-3" />
                 </tr>
@@ -897,6 +973,7 @@ export function AdminLiveData() {
                   const kitchenTotalizer = latestTotalizer(kitchen);
                   const bathroomTotalizer = latestTotalizer(bathroom);
                   const otherTotalizer = latestTotalizer(other);
+                  const receivedAt = latestReceivedAt(f);
                   return (
                     <tr key={f.flat} className="hover:bg-muted/40">
                       <td className="tabular px-5 py-3 font-semibold">{f.flat}</td>
@@ -945,6 +1022,20 @@ export function AdminLiveData() {
                           </span>
                         )}
                       </td>
+                      <td className="whitespace-nowrap px-5 py-3 text-xs text-muted-foreground">
+                        {receivedAt === null ? (
+                          "—"
+                        ) : (
+                          <span className="leading-tight">
+                            <span className="block font-medium text-foreground">
+                              {timeAgo(receivedAt)}
+                            </span>
+                            <span className="tabular block">
+                              {shortDateTime(receivedAt)}
+                            </span>
+                          </span>
+                        )}
+                      </td>
                       <td className="px-5 py-3">
                         {flags.length === 0 ? (
                           <Badge tone="success">OK</Badge>
@@ -975,6 +1066,7 @@ export function AdminLiveData() {
           <ul className="divide-y divide-border md:hidden">
             {filteredFlats.map((f) => {
               const flags = [...new Set(f.meters.flatMap((m) => latestFlags(m)))];
+              const receivedAt = latestReceivedAt(f);
               return (
                 <li key={f.flat}>
                   <button
@@ -994,6 +1086,11 @@ export function AdminLiveData() {
                         {litres(f.totalConsumptionLitres)} · {f.meters.length} meter
                         {f.meters.length === 1 ? "" : "s"}
                       </p>
+                      {receivedAt !== null && (
+                        <p className="text-xs text-muted-foreground">
+                          Received {timeAgo(receivedAt)}
+                        </p>
+                      )}
                     </div>
                     {flags.length === 0 ? (
                       <Badge tone="success">OK</Badge>
