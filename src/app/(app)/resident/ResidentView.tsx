@@ -10,8 +10,8 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
-import { IconDroplet, IconGauge, IconRupee, IconAlert } from "@/components/icons";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { IconDroplet, IconGauge, IconRupee } from "@/components/icons";
 import { formatDate } from "@/lib/utils";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
 
@@ -107,21 +107,12 @@ export function ResidentView({
   });
   const hasOther = chartData.some((d) => d.Other > 0);
 
-  const alerts = [
-    ...new Set(
-      flat.meters.flatMap((m) => {
-        const r = latestReading(m);
-        return r ? [...r.alerts] : [];
-      })
-    ),
-  ];
-
   let from = 0;
 
   return (
     <div className="space-y-5">
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3">
         <Card>
           <CardContent className="pt-5">
             <div className="flex items-center justify-between">
@@ -156,36 +147,6 @@ export function ResidentView({
           </CardContent>
         </Card>
 
-        <Card className="col-span-2 lg:col-span-1">
-          <CardContent className="pt-5">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">Meter status</p>
-              <span
-                className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                  alerts.length
-                    ? "bg-destructive/15 text-destructive"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <IconAlert className="h-5 w-5" />
-              </span>
-            </div>
-            {alerts.length === 0 ? (
-              <p className="mt-2 text-2xl font-bold text-foreground">OK</p>
-            ) : (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {alerts.map((a) => (
-                  <Badge key={a} tone="destructive">
-                    {a}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {flat.meters.length} meter{flat.meters.length === 1 ? "" : "s"}
-            </p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Daily chart */}
