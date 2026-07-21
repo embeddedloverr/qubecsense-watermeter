@@ -151,6 +151,36 @@ To switch to filesystem or S3 storage later, change `src/lib/image.ts` +
 
 ---
 
+## 👤 Resident logins (one per flat)
+
+`npm run seed` also creates a **resident account per flat**:
+
+- **Username:** `rosalyn_<flatNumber>` (prefix configurable via `RESIDENT_USERNAME_PREFIX`)
+- **Password:** random one-time password (`RESIDENT_PASSWORD_LENGTH`, default 10)
+- Residents must **change the password on first login** before they can use the app
+- They land on `/resident` — their own flat's consumption, bill and meters only
+
+Newly created credentials are written to **`resident-credentials-<timestamp>.csv`
+in the project root** (gitignored). The seed prints the absolute path.
+
+> ⚠️ The CSV is only written for residents **created on that run**. Re-running
+> the seed after the accounts exist prints `0 created` and writes **no CSV** —
+> stored passwords are bcrypt hashes and cannot be recovered.
+
+### Lost the CSV? Re-issue passwords
+
+```bash
+npm run reset:residents               # only residents who never set their own
+                                      # password (safe default) → new CSV
+npm run reset:residents -- --all      # every resident, including those who
+                                      # already chose their own password
+npm run reset:residents -- --flat=101,102   # specific flats
+```
+
+Every reset account is flagged to change its password again on next login.
+The default deliberately skips residents who already set their own password,
+so re-issuing does not lock out people who are already using the app.
+
 ## 🔁 Re-seeding / updating flats
 
 `npm run seed` is **idempotent** — it upserts flats (won't duplicate) and only
