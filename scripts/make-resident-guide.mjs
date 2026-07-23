@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { createHmac } from "node:crypto";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import puppeteer from "puppeteer-core";
@@ -42,12 +43,20 @@ const CHROME_CANDIDATES = [
 ].filter(Boolean);
 
 const DEMO_USERNAME = "guide_demo_account";
-const DEMO_PASSWORD = "Kp7uEXAMPLE";
-const DEMO_NEW_PASSWORD = "Monsoon7Tap";
+const DEMO_EMAIL = "resident@example.com"; // generic; masks to re•••nt@example.com
+const DEMO_OTP = "246813"; // pre-set so the walkthrough needs no real email
 
 // Sample values shown in the screenshots instead of real resident details.
 const SAMPLE_FLAT = "101";
 const SAMPLE_NAME = "Resident Name";
+const SAMPLE_MASKED_EMAIL = "re•••nt@example.com";
+
+// Mirror of lib/otp.ts hashing so we can pre-seed a known code.
+function hashOtp(otp) {
+  return createHmac("sha256", process.env.AUTH_SECRET || "dev-secret")
+    .update(otp)
+    .digest("hex");
+}
 
 const UserSchema = new mongoose.Schema(
   {
@@ -61,11 +70,14 @@ const UserSchema = new mongoose.Schema(
     active: Boolean,
     mustChangePassword: Boolean,
     lastLoginAt: Date,
+    otpHash: String,
+    otpExpiresAt: Date,
+    otpAttempts: Number,
   },
   { timestamps: true }
 );
 const FlatSchema = new mongoose.Schema(
-  { flatNumber: String, ownerName: String, ownerPhone: String },
+  { flatNumber: String, ownerName: String, ownerEmail: String, ownerPhone: String },
   { timestamps: true }
 );
 const User = mongoose.models.User || mongoose.model("User", UserSchema);
@@ -154,17 +166,28 @@ async function main() {
 
   const flatDoc = await Flat.findOne({ flatNumber: GUIDE_FLAT }).lean();
   const realName = flatDoc?.ownerName || "";
+  const realEmail = flatDoc?.ownerEmail || "";
 
-  // Fresh throwaway account for the walkthrough.
+  // Point the demo flat at a generic email for the walkthrough, then restore.
+  await Flat.updateOne(
+    { flatNumber: GUIDE_FLAT },
+    { $set: { ownerEmail: DEMO_EMAIL } }
+  );
+
+  // Fresh throwaway account with a pre-set one-time code, so the walkthrough
+  // needs no real email delivery.
   await User.deleteOne({ username: DEMO_USERNAME });
   await User.create({
     name: SAMPLE_NAME,
     username: DEMO_USERNAME,
-    passwordHash: await bcrypt.hash(DEMO_PASSWORD, 10),
+    passwordHash: await bcrypt.hash("x" + Math.random().toString(36).slice(2), 10),
     role: "resident",
     flatNumber: GUIDE_FLAT,
     active: true,
     mustChangePassword: true,
+    otpHash: hashOtp(DEMO_OTP),
+    otpExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    otpAttempts: 0,
   });
   console.log(`✓ Temporary demo account created (flat ${GUIDE_FLAT}).`);
 
@@ -188,32 +211,52 @@ async function main() {
     const page = await browser.newPage();
     await page.setViewport({ width: 420, height: 880, deviceScaleFactor: 2 });
 
-    // 1 — Login screen
+    // Stub the "send code" call so the walkthrough never sends a real email
+    // and our pre-seeded code stays valid. Everything else passes through.
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      if (
+        req.method() === "POST" &&
+        req.url().includes("/api/auth/otp/request")
+      ) {
+        req.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            email: SAMPLE_MASKED_EMAIL,
+            message: "A login code has been sent to your email.",
+          }),
+        });
+      } else {
+        req.continue();
+      }
+    });
+
+    const clickEmailCodeTab = () =>
+      page.evaluate(() => {
+        const b = [...document.querySelectorAll('button[type="button"]')].find(
+          (x) => x.textContent.trim() === "Email code"
+        );
+        if (b) b.click();
+      });
+
+    // 1 — Login screen, "Email code" method selected with a sample username.
     await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle0" });
-    await page.type("#identifier", `rosalyn_${SAMPLE_FLAT}`);
-    await page.type("#password", "••••••••••");
+    await clickEmailCodeTab();
+    await page.type("#otp-id", `rosalyn_${SAMPLE_FLAT}`);
     await capture(page, "login");
 
-    // Reload for a clean form (these are controlled inputs, so the React
-    // state must be reset properly), then sign in for real.
+    // 2 — Request a code for the demo account, then screenshot the code entry.
     await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle0" });
-    await page.type("#identifier", DEMO_USERNAME);
-    await page.type("#password", DEMO_PASSWORD);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle0" }).catch(() => {}),
-      page.click('button[type="submit"]'),
-    ]);
-    await page.waitForFunction(
-      () => location.pathname === "/change-password",
-      { timeout: 15000 }
-    );
+    await clickEmailCodeTab();
+    await page.type("#otp-id", DEMO_USERNAME);
+    await page.click('button[type="submit"]'); // "Email me a code" (stubbed)
+    await page.waitForSelector("#otp-code", { timeout: 15000 });
+    await capture(page, "enterCode");
 
-    // 2 — Forced "set your password" screen
-    await capture(page, "setPassword");
-
-    // Complete it.
-    await page.type("#new", DEMO_NEW_PASSWORD);
-    await page.type("#confirm", DEMO_NEW_PASSWORD);
+    // Enter the pre-seeded code (verify hits the real server) → dashboard.
+    await page.type("#otp-code", DEMO_OTP);
     await Promise.all([
       page.waitForNavigation({ waitUntil: "networkidle0" }).catch(() => {}),
       page.click('button[type="submit"]'),
@@ -292,7 +335,12 @@ async function main() {
     await browser.close();
     rmSync(profile, { recursive: true, force: true });
     await User.deleteOne({ username: DEMO_USERNAME });
-    console.log("✓ Temporary demo account removed.");
+    // Restore the demo flat's real email.
+    await Flat.updateOne(
+      { flatNumber: GUIDE_FLAT },
+      { $set: { ownerEmail: realEmail } }
+    );
+    console.log("✓ Temporary demo account removed; flat email restored.");
     await mongoose.disconnect();
   }
 }
@@ -345,11 +393,11 @@ function buildHtml(s) {
   <div class="box">
     <p style="margin:0 0 6px"><strong>What this guide covers</strong></p>
     <ul style="margin:0">
-      <li>Signing in for the first time</li>
-      <li>Setting your own password</li>
+      <li>Signing in with an email code — no password needed</li>
       <li>Reading your water dashboard</li>
       <li>Checking your bill and daily history</li>
-      <li>Changing your password later</li>
+      <li>Understanding your meters</li>
+      <li>Setting a password later (optional)</li>
     </ul>
   </div>
   <p style="margin-top:36px;color:#94a3b8;font-size:9pt">
@@ -359,47 +407,48 @@ function buildHtml(s) {
 </div>
 
 <div class="page">
-  <h2>1. Signing in for the first time</h2>
+  <h2>1. Signing in with an email code</h2>
   <div class="cols">
     <div class="text">
       <p>Open the portal link given by your society office in any browser on your phone or computer.</p>
+      <p><strong>No password is needed the first time.</strong> Choose the
+        <strong>Email code</strong> tab and we send a code to the email
+        registered for your flat.</p>
+      <ol>
+        <li>Tap the <strong>Email code</strong> tab.</li>
+        <li>Type your <strong>username</strong> or your <strong>flat's email address</strong>.</li>
+        <li>Tap <strong>Email me a code</strong>.</li>
+      </ol>
       <h3>Your username</h3>
-      <p>Your username is the word <strong>rosalyn</strong>, an underscore, and your flat number:</p>
+      <p>The word <strong>rosalyn</strong>, an underscore, then your flat number:</p>
       <table>
         <tr><th>Flat</th><th>Username</th></tr>
         <tr><td>101</td><td>rosalyn_101</td></tr>
         <tr><td>1203</td><td>rosalyn_1203</td></tr>
       </table>
-      <h3>Your password</h3>
-      <p>Use the one-time password given to you by the society office. Type it exactly — it is case sensitive.</p>
-      <div class="note"><strong>Tip:</strong> tap <em>Show</em> next to the password box to check what you typed.</div>
+      <div class="note">You can also just type the email address the society has on file for your flat — either works.</div>
     </div>
-    ${img("login", "The sign-in screen")}
+    ${img("login", "Choose “Email code” to sign in")}
   </div>
 </div>
 
 <div class="page">
-  <h2>2. Creating your own password</h2>
+  <h2>2. Entering your code</h2>
   <div class="cols">
     <div class="text">
-      <p>The first time you sign in, you must replace the one-time password with your own. This screen appears automatically.</p>
+      <p>Within a few moments you will receive an email from QubecSense with a
+        <strong>6-digit code</strong>. Open your email, then:</p>
       <ol>
-        <li>Type a new password. It must have <strong>at least 8 characters</strong>,
-            including <strong>one capital letter</strong>, <strong>one small
-            letter</strong> and <strong>one number</strong>.</li>
-        <li>Type the same password again to confirm.</li>
-        <li>Tap <strong>Save new password</strong>.</li>
+        <li>Type the 6-digit code into the box.</li>
+        <li>Tap <strong>Verify &amp; sign in</strong>.</li>
       </ol>
-      <p>The tick list under the box turns green as each requirement is met.
-         Adding a symbol such as <strong>!</strong> or <strong>@</strong> makes
-         it stronger still.</p>
-      <div class="note"><strong>Avoid:</strong> your flat number, your username,
-        and easy runs like <em>1234</em> or <em>abcd</em> — these are not accepted.</div>
-      <p>You go straight to your dashboard. From then on, sign in with your <em>new</em> password.</p>
-      <div class="warn"><strong>Please note:</strong> the one-time password stops working once you set your own. Choose something you will remember.</div>
-      <div class="note">Nobody at the society can see your password — if you forget it, the office issues a fresh one-time password.</div>
+      <p>That's it — you go straight to your dashboard.</p>
+      <div class="note"><strong>Didn't get it?</strong> Check your spam/junk
+        folder. After a minute you can tap <strong>Resend code</strong>.</div>
+      <div class="warn">Each code works only <strong>once</strong> and expires
+        after <strong>10 minutes</strong>. Never share it with anyone.</div>
     </div>
-    ${img("setPassword", "Setting your own password")}
+    ${img("enterCode", "Enter the 6-digit code from your email")}
   </div>
 </div>
 
@@ -484,24 +533,33 @@ function buildHtml(s) {
 </div>
 
 <div class="page">
-  <h2>9. Changing your password later</h2>
+  <h2>9. Setting a password (optional)</h2>
   <div class="cols">
     <div class="text">
-      <p>Tap <strong>Password</strong> in the bottom menu at any time.</p>
+      <p>You never need a password — the email code works every time. But if
+        you would like to sign in with a password as well, you can set one.</p>
+      <p>Tap <strong>Password</strong> in the bottom menu, then:</p>
       <ol>
-        <li>Enter your current password.</li>
-        <li>Enter the new password twice.</li>
-        <li>Tap <strong>Save new password</strong>.</li>
+        <li>Type a password with <strong>at least 8 characters</strong>,
+            including a <strong>capital letter</strong>, a <strong>small
+            letter</strong> and a <strong>number</strong>.</li>
+        <li>Type it again to confirm, and tap <strong>Save</strong>.</li>
       </ol>
-      <p>To sign out, use the exit icon in the top-right corner of the screen.</p>
+      <p>Afterwards you can sign in using either method — <strong>Password</strong>
+        or <strong>Email code</strong>. To sign out, use the exit icon in the
+        top-right corner.</p>
+      <div class="note"><strong>Avoid</strong> your flat number, your username,
+        and easy runs like <em>1234</em> or <em>abcd</em> — these are not accepted.</div>
     </div>
-    ${img("changePassword", "Changing your password")}
+    ${img("changePassword", "Setting a password (optional)")}
   </div>
 
   <h2 style="margin-top:26px">Common questions</h2>
   <dl class="faq">
-    <dt>I forgot my password.</dt>
-    <dd>Contact the society office. They will issue a new one-time password, and you set your own again on the next sign-in.</dd>
+    <dt>Do I need a password?</dt>
+    <dd>No. Just choose <strong>Email code</strong> each time and sign in with the code we email you. A password is optional.</dd>
+    <dt>I didn't get the code email.</dt>
+    <dd>Check your spam/junk folder. After a minute, tap <strong>Resend code</strong>. If it still doesn't arrive, contact the society office to confirm the email on file for your flat.</dd>
     <dt>My dashboard says no readings yet.</dt>
     <dd>Your meters have not sent data so far. This is normal just after installation — please check again in a day or two.</dd>
     <dt>My usage looks far too high.</dt>
