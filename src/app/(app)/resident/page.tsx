@@ -2,8 +2,10 @@ import { getSession } from "@/lib/auth";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
+import { User } from "@/lib/models/User";
 import { fetchLiveData, LiveDataError, type LiveFlat } from "@/lib/liveData";
 import { applySlabs, type Slab } from "@/lib/billing";
+import { usageInPeriod, type BudgetPeriod } from "@/lib/budget";
 import { Card, CardContent } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
 import { ResidentView } from "./ResidentView";
@@ -20,9 +22,12 @@ export default async function ResidentHome() {
   const flatNumber = session.flat || "";
 
   await connectDB();
-  const [flatDoc, tariffDoc] = await Promise.all([
+  const [flatDoc, tariffDoc, userDoc] = await Promise.all([
     flatNumber ? Flat.findOne({ flatNumber }).lean() : null,
     Tariff.findOne({ key: "default" }).lean(),
+    User.findById(session.sub)
+      .select("budgetEnabled budgetLitres budgetPeriod")
+      .lean(),
   ]);
 
   let flat: LiveFlat | null = null;
@@ -59,6 +64,22 @@ export default async function ResidentHome() {
   }
   const bill = applySlabs(monthLitres, slabs, fixedCharge);
 
+  // Usage this week / month for the budget widget.
+  const flatReadings = flat
+    ? flat.meters.flatMap((m) =>
+        m.readings.map((r) => ({ date: r.date, litres: r.consumptionLitres }))
+      )
+    : [];
+  const usage = {
+    weekly: usageInPeriod(flatReadings, "weekly"),
+    monthly: usageInPeriod(flatReadings, "monthly"),
+  };
+  const budget = {
+    enabled: (userDoc as any)?.budgetEnabled === true,
+    litres: (userDoc as any)?.budgetLitres ?? null,
+    period: (((userDoc as any)?.budgetPeriod as BudgetPeriod) || "monthly"),
+  };
+
   const ownerName = (flatDoc as any)?.ownerName || session.name;
 
   return (
@@ -91,6 +112,8 @@ export default async function ResidentHome() {
           breakdown={bill.breakdown}
           fixedCharge={fixedCharge}
           tariffConfigured={slabs.length > 0}
+          usage={usage}
+          budget={budget}
         />
       )}
     </div>

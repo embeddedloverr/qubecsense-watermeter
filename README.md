@@ -204,6 +204,26 @@ ones, and the script **aborts** if any real detail is still visible, so the
 guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 `guide-preview.png` of the whole document.
 
+## 🔔 Usage alerts (resident water budgets)
+
+Residents can set a **weekly or monthly water limit** on their dashboard and
+get an email when their flat goes over it. Delivery uses the same `SMTP_*`
+config as the other emails.
+
+The alert emails are sent by a cron endpoint — run it on a schedule (e.g.
+once a day) on the server:
+
+```bash
+# add to crontab (adjust the URL); needs CRON_SECRET set in .env
+0 8 * * *  curl -fsS "https://meters.qubecsense.com/api/cron/budget-alerts?key=YOUR_CRON_SECRET" >/dev/null
+```
+
+The endpoint (`GET|POST /api/cron/budget-alerts`) is authorised by the
+`x-cron-key` header / `?key=` matching `CRON_SECRET`, or by an admin session.
+It checks every resident with an active budget, and emails each one **once
+per period** while they remain over the limit (a new week/month re-arms the
+alert). Changing or toggling the alert also re-arms it.
+
 ## 🔁 Re-seeding / updating flats
 
 `npm run seed` is **idempotent** — it upserts flats (won't duplicate) and only

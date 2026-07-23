@@ -24,6 +24,12 @@ export interface IUser {
   otpExpiresAt?: Date;
   otpAttempts?: number;
   otpLastSentAt?: Date;
+  /** Resident water usage alert (email when a week/month exceeds the limit). */
+  budgetEnabled?: boolean;
+  budgetLitres?: number;
+  budgetPeriod?: "weekly" | "monthly";
+  /** Period key already alerted for, so a resident is emailed once per period. */
+  budgetLastAlertKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +66,10 @@ const UserSchema = new Schema<IUser>(
     otpExpiresAt: { type: Date },
     otpAttempts: { type: Number, default: 0 },
     otpLastSentAt: { type: Date },
+    budgetEnabled: { type: Boolean, default: false },
+    budgetLitres: { type: Number },
+    budgetPeriod: { type: String, enum: ["weekly", "monthly"], default: "monthly" },
+    budgetLastAlertKey: { type: String },
   },
   { timestamps: true }
 );

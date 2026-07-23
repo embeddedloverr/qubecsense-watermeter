@@ -10,14 +10,24 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Button,
+  Input,
+} from "@/components/ui";
 import {
   IconDroplet,
   IconGauge,
   IconRupee,
   IconChevronRight,
+  IconAlert,
+  IconCheckCircle,
 } from "@/components/icons";
 import { formatDate } from "@/lib/utils";
+import { useToast } from "@/components/Toast";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
 
 interface SlabCharge {
@@ -241,6 +251,190 @@ function HistorySection({
   );
 }
 
+/* ------------------------------ Budget / alert ------------------------------ */
+
+type BudgetPeriod = "weekly" | "monthly";
+
+function BudgetCard({
+  usage,
+  initial,
+}: {
+  usage: { weekly: number; monthly: number };
+  initial: { enabled: boolean; litres: number | null; period: BudgetPeriod };
+}) {
+  const { toast } = useToast();
+  const [enabled, setEnabled] = React.useState(initial.enabled);
+  const [period, setPeriod] = React.useState<BudgetPeriod>(initial.period);
+  const [limit, setLimit] = React.useState(
+    initial.litres != null ? String(initial.litres) : ""
+  );
+  const [saving, setSaving] = React.useState(false);
+  // The saved settings drive the live status line; edits only take effect on save.
+  const [saved, setSaved] = React.useState(initial);
+
+  const used = saved.period === "weekly" ? usage.weekly : usage.monthly;
+  const active = saved.enabled && saved.litres != null && saved.litres > 0;
+  const pct = active ? Math.min(100, (used / (saved.litres || 1)) * 100) : 0;
+  const over = active && used > (saved.litres || 0);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/resident/budget", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled,
+          period,
+          litres: enabled ? Number(limit) : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || "Could not save.", "error");
+        return;
+      }
+      setSaved({ enabled: data.enabled, litres: data.litres, period: data.period });
+      toast(
+        data.enabled ? "Usage alert saved." : "Usage alert turned off.",
+        "success"
+      );
+    } catch {
+      toast("Network error. Please try again.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Usage alert</CardTitle>
+        {active &&
+          (over ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
+              <IconAlert className="h-3.5 w-3.5" /> Over limit
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+              <IconCheckCircle className="h-3.5 w-3.5" /> Within limit
+            </span>
+          ))}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Live status vs the saved limit */}
+        {active && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Used {saved.period === "weekly" ? "this week" : "this month"}
+              </span>
+              <span className="tabular font-medium text-foreground">
+                {litres(used)} / {litres(saved.litres || 0)}
+              </span>
+            </div>
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  over ? "bg-destructive" : "bg-primary"
+                }`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {over && (
+              <p className="mt-1.5 text-xs text-destructive">
+                {litres(used - (saved.litres || 0))} over your limit. We&apos;ll
+                email you about this.
+              </p>
+            )}
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Get an email if your flat&apos;s water use goes over a limit you set.
+        </p>
+
+        {/* Enable toggle */}
+        <label className="flex items-center justify-between">
+          <span className="text-sm font-medium text-foreground">
+            Email me when I go over
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            onClick={() => setEnabled((v) => !v)}
+            className={`relative h-6 w-11 rounded-full transition-colors ${
+              enabled ? "bg-primary" : "bg-muted"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                enabled ? "translate-x-[22px]" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </label>
+
+        {enabled && (
+          <div className="space-y-3">
+            {/* Period selector */}
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+              {(["weekly", "monthly"] as BudgetPeriod[]).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-md py-1.5 text-sm font-medium capitalize transition-colors ${
+                    period === p
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            {/* Limit input */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">
+                Limit ({period === "weekly" ? "per week" : "per month"})
+              </label>
+              <div className="relative">
+                <Input
+                  inputMode="numeric"
+                  value={limit}
+                  onChange={(e) => setLimit(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="e.g. 30000"
+                  className="pr-14"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                  litres
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                So far {period === "weekly" ? "this week" : "this month"}:{" "}
+                {litres(period === "weekly" ? usage.weekly : usage.monthly)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <Button
+          size="md"
+          onClick={save}
+          loading={saving}
+          disabled={enabled && (!limit || Number(limit) <= 0)}
+          className="w-full"
+        >
+          Save alert settings
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ResidentView({
   flat,
   dates,
@@ -250,6 +444,8 @@ export function ResidentView({
   breakdown,
   fixedCharge,
   tariffConfigured,
+  usage,
+  budget,
 }: {
   flat: LiveFlat | null;
   dates: string[];
@@ -259,6 +455,8 @@ export function ResidentView({
   breakdown: SlabCharge[];
   fixedCharge: number;
   tariffConfigured: boolean;
+  usage: { weekly: number; monthly: number };
+  budget: { enabled: boolean; litres: number | null; period: "weekly" | "monthly" };
 }) {
   if (!flat || flat.meters.length === 0) {
     return (
@@ -336,6 +534,9 @@ export function ResidentView({
         </Card>
 
       </div>
+
+      {/* Usage alert / budget */}
+      <BudgetCard usage={usage} initial={budget} />
 
       {/* Daily chart */}
       <Card>
