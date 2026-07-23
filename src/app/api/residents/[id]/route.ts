@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomInt } from "node:crypto";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
+import { Flat } from "@/lib/models/Flat";
 import { getSession, hashPassword } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -80,7 +81,9 @@ export async function POST(
   }
 }
 
-// PATCH /api/residents/<id>  { active: boolean }
+// PATCH /api/residents/<id>
+//   { active: boolean }  — enable/disable the account
+//   { email: string }    — set/change the flat's login email (where OTPs go)
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -90,23 +93,39 @@ export async function PATCH(
   }
 
   try {
-    const { active } = await req.json();
-    if (typeof active !== "boolean") {
-      return NextResponse.json(
-        { error: "Pass { active: true | false }." },
-        { status: 400 }
-      );
-    }
-
+    const body = await req.json();
     const user = await loadResident(params.id);
     if (!user) {
       return NextResponse.json({ error: "Resident not found." }, { status: 404 });
     }
 
-    user.active = active;
-    await user.save();
+    // Email change → update the flat's ownerEmail (OTP delivery address).
+    if (body.email !== undefined) {
+      const email = String(body.email).trim().toLowerCase();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json(
+          { error: "Enter a valid email address." },
+          { status: 400 }
+        );
+      }
+      await Flat.updateOne(
+        { flatNumber: user.flatNumber },
+        { $set: { ownerEmail: email } }
+      );
+      return NextResponse.json({ id: String(user._id), email });
+    }
 
-    return NextResponse.json({ id: String(user._id), active: user.active });
+    // Active toggle.
+    if (typeof body.active === "boolean") {
+      user.active = body.active;
+      await user.save();
+      return NextResponse.json({ id: String(user._id), active: user.active });
+    }
+
+    return NextResponse.json(
+      { error: "Pass { active } or { email }." },
+      { status: 400 }
+    );
   } catch (err) {
     console.error("update resident error", err);
     return NextResponse.json(

@@ -9,7 +9,14 @@ import {
   Button,
   Spinner,
 } from "@/components/ui";
-import { IconSearch, IconX, IconAlert, IconUsers, IconCheckCircle } from "@/components/icons";
+import {
+  IconSearch,
+  IconX,
+  IconAlert,
+  IconUsers,
+  IconCheckCircle,
+  IconPen,
+} from "@/components/icons";
 import { useToast } from "@/components/Toast";
 import { formatDateTime } from "@/lib/utils";
 
@@ -19,6 +26,7 @@ interface Resident {
   username: string;
   flatNumber: string;
   phone: string;
+  email: string;
   active: boolean;
   pendingFirstLogin: boolean;
   lastLoginAt: string | null;
@@ -30,14 +38,16 @@ interface Summary {
   neverLoggedIn: number;
   pendingFirstLogin: number;
   inactive: number;
+  noEmail: number;
 }
 
-type Filter = "all" | "never" | "pending" | "inactive";
+type Filter = "all" | "never" | "pending" | "noemail" | "inactive";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "never", label: "Never logged in" },
   { key: "pending", label: "Password not set" },
+  { key: "noemail", label: "No email" },
   { key: "inactive", label: "Disabled" },
 ];
 
@@ -54,6 +64,7 @@ export function AdminResidents() {
     username: string;
     password: string;
   } | null>(null);
+  const [editing, setEditing] = React.useState<Resident | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -80,11 +91,13 @@ export function AdminResidents() {
       if (filter === "never" && r.lastLoginAt) return false;
       if (filter === "pending" && !r.pendingFirstLogin) return false;
       if (filter === "inactive" && r.active) return false;
+      if (filter === "noemail" && r.email) return false;
       if (!q) return true;
       return (
         r.flatNumber.toLowerCase().includes(q) ||
         r.name.toLowerCase().includes(q) ||
-        r.username.toLowerCase().includes(q)
+        r.username.toLowerCase().includes(q) ||
+        r.email.toLowerCase().includes(q)
       );
     });
   }, [data, query, filter]);
@@ -140,6 +153,36 @@ export function AdminResidents() {
     }
   };
 
+  const saveEmail = async (r: Resident, email: string) => {
+    setBusyId(r.id);
+    try {
+      const res = await fetch(`/api/residents/${r.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        toast(body.error || "Could not update the email.", "error");
+        return false;
+      }
+      toast(
+        email
+          ? `Email for flat ${r.flatNumber} updated.`
+          : `Email for flat ${r.flatNumber} cleared.`,
+        "success"
+      );
+      setEditing(null);
+      load();
+      return true;
+    } catch {
+      toast("Network error. Please try again.", "error");
+      return false;
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -170,7 +213,12 @@ export function AdminResidents() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Accounts" value={data.total} icon={IconUsers} />
         <Stat label="Never logged in" value={data.neverLoggedIn} icon={IconAlert} tone="warning" />
-        <Stat label="Password not set" value={data.pendingFirstLogin} icon={IconAlert} tone="warning" />
+        <Stat
+          label="No email"
+          value={data.noEmail}
+          icon={IconAlert}
+          tone={data.noEmail > 0 ? "warning" : "neutral"}
+        />
         <Stat label="Disabled" value={data.inactive} icon={IconX} tone="neutral" />
       </div>
 
@@ -181,7 +229,7 @@ export function AdminResidents() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search flat, owner or username…"
+            placeholder="Search flat, owner, username or email…"
             className="pl-9"
           />
         </div>
@@ -218,6 +266,7 @@ export function AdminResidents() {
                   <th className="px-5 py-3 font-medium">Flat</th>
                   <th className="px-5 py-3 font-medium">Owner</th>
                   <th className="px-5 py-3 font-medium">Username</th>
+                  <th className="px-5 py-3 font-medium">Email</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 font-medium">Last login</th>
                   <th className="px-5 py-3" />
@@ -232,6 +281,22 @@ export function AdminResidents() {
                     </td>
                     <td className="tabular px-5 py-3 text-muted-foreground">
                       {r.username}
+                    </td>
+                    <td className="max-w-[210px] px-5 py-3">
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="group flex items-center gap-1.5 text-left"
+                        title="Edit login email"
+                      >
+                        {r.email ? (
+                          <span className="truncate text-muted-foreground group-hover:text-foreground">
+                            {r.email}
+                          </span>
+                        ) : (
+                          <Badge tone="warning">Add email</Badge>
+                        )}
+                        <IconPen className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                      </button>
                     </td>
                     <td className="px-5 py-3">
                       <StatusBadge resident={r} />
@@ -277,6 +342,17 @@ export function AdminResidents() {
                     <p className="truncate text-sm text-muted-foreground">
                       {r.name || "—"} · {r.username}
                     </p>
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="mt-0.5 flex items-center gap-1.5 text-xs"
+                    >
+                      {r.email ? (
+                        <span className="truncate text-muted-foreground">{r.email}</span>
+                      ) : (
+                        <Badge tone="warning">Add email</Badge>
+                      )}
+                      <IconPen className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {r.lastLoginAt
                         ? `Last login ${formatDateTime(r.lastLoginAt)}`
@@ -311,6 +387,15 @@ export function AdminResidents() {
 
       {issued && (
         <IssuedPasswordModal issued={issued} onClose={() => setIssued(null)} />
+      )}
+
+      {editing && (
+        <EmailEditModal
+          resident={editing}
+          busy={busyId === editing.id}
+          onSave={(email) => saveEmail(editing, email)}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   );
@@ -361,6 +446,95 @@ function Stat({
 }
 
 /** Shows a freshly issued password once — it is not stored in plaintext. */
+/** Add or change the login email (the flat's ownerEmail — where OTP codes go). */
+function EmailEditModal({
+  resident,
+  busy,
+  onSave,
+  onClose,
+}: {
+  resident: Resident;
+  busy: boolean;
+  onSave: (email: string) => void;
+  onClose: () => void;
+}) {
+  const [email, setEmail] = React.useState(resident.email);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const v = email.trim();
+    if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      setErr("Enter a valid email address.");
+      return;
+    }
+    onSave(v);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl animate-fade-in"
+      >
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-foreground">
+              Login email · Flat {resident.flatNumber}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {resident.name || "—"} · {resident.username}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+          >
+            <IconX className="h-5 w-5" />
+          </button>
+        </div>
+
+        <label className="mb-1.5 block text-sm font-medium text-foreground">
+          Email address
+        </label>
+        <Input
+          type="email"
+          autoFocus
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="owner@example.com"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setErr("");
+          }}
+        />
+        {err && <p className="mt-1.5 text-sm text-destructive">{err}</p>}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Login codes are emailed here. Leave blank to clear it.
+        </p>
+
+        <div className="mt-4 flex gap-2">
+          <Button type="submit" size="md" loading={busy} className="flex-1">
+            Save
+          </Button>
+          <Button type="button" size="md" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function IssuedPasswordModal({
   issued,
   onClose,
