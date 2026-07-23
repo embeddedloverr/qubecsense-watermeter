@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
   const session = await getSession();
-  if (session) redirect(session.mustChange ? "/change-password" : homeFor(session.role));
+  if (session) redirect(homeFor(session.role));
 
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10">

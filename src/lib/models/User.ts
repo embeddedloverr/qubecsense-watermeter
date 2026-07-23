@@ -19,6 +19,11 @@ export interface IUser {
   mustChangePassword: boolean;
   /** Last successful sign-in; unset means the account has never been used. */
   lastLoginAt?: Date;
+  /** Email one-time-code login state (HMAC of the code, never plain text). */
+  otpHash?: string;
+  otpExpiresAt?: Date;
+  otpAttempts?: number;
+  otpLastSentAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +56,10 @@ const UserSchema = new Schema<IUser>(
     active: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
     lastLoginAt: { type: Date },
+    otpHash: { type: String },
+    otpExpiresAt: { type: Date },
+    otpAttempts: { type: Number, default: 0 },
+    otpLastSentAt: { type: Date },
   },
   { timestamps: true }
 );

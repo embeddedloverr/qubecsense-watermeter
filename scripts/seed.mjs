@@ -158,49 +158,35 @@ async function main() {
       continue;
     }
 
-    const password = randomPassword(pwLen);
+    // Residents log in with an email one-time code, so no password is
+    // distributed. We still store a random, undisclosed password (the schema
+    // requires one) with mustChangePassword true, meaning "no self-chosen
+    // password yet" — they can optionally set one later without a temp password.
     await User.create({
       name: f.ownerName || `Flat ${flatNumber}`,
       username,
-      passwordHash: await bcrypt.hash(password, 10),
+      passwordHash: await bcrypt.hash(randomPassword(pwLen), 10),
       role: "resident",
       flatNumber,
       phone: f.ownerPhone || "",
       active: true,
       mustChangePassword: true,
     });
-    created.push({
-      flat: flatNumber,
-      username,
-      password,
-      name: f.ownerName || "",
-    });
+    created.push({ flat: flatNumber, username, name: f.ownerName || "" });
   }
 
+  const withEmail = flats.filter((f) => (f.ownerEmail || "").trim()).length;
   console.log(
     `✓ Resident logins: ${created.length} created, ${skipped} already existed.`
   );
-
-  // --- Write the new credentials to a CSV so the admin can hand them out ---
-  if (created.length) {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const csvPath = join(__dirname, "..", `resident-credentials-${stamp}.csv`);
-    const header = "Flat,Username,Password,Owner\n";
-    const body = created
-      .map(
-        (c) =>
-          `"${c.flat}","${c.username}","${c.password}","${(c.name || "").replace(/"/g, '""')}"`
-      )
-      .join("\n");
-    writeFileSync(csvPath, header + body + "\n", "utf8");
-    console.log(`✓ Wrote credentials to: ${csvPath}`);
-    console.log("  Distribute these to residents; each must change it on first login.");
-  }
+  console.log(
+    `  ${withEmail}/${flats.length} flats have an email for one-time-code login.`
+  );
 
   console.log("\n✅ Seed complete.\n");
   console.log("   Admin login:      ", SEED_ADMIN_EMAIL, "/", SEED_ADMIN_PASSWORD);
   console.log("   Technician login: ", SEED_TECH_EMAIL, "/", SEED_TECH_PASSWORD);
-  console.log(`   Resident logins:   ${RESIDENT_USERNAME_PREFIX}_<flat>  (see the CSV)`);
+  console.log(`   Residents:         sign in with "Email code" — username ${RESIDENT_USERNAME_PREFIX}_<flat> or their flat email.`);
   console.log("\n   Change the seeded staff passwords after first login.\n");
 
   await mongoose.disconnect();

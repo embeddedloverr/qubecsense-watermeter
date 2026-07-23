@@ -35,14 +35,6 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Seeded accounts must set their own password before using the app.
-  if (session.mustChange && pathname !== "/change-password") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/change-password";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
   // Keep each role inside its own area.
   const wrongArea =
     (pathname.startsWith("/admin") && session.role !== "admin") ||

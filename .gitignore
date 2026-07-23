@@ -12,12 +12,14 @@ public/sw.js.map
 public/workbox-*.js
 public/workbox-*.js.map
 public/fallback-*.js
+public/swe-worker-*.js
 node_modules/
 _dev.log
 _npm-install.log
 
-# Seeded resident credentials — never commit
+# Seeded resident credentials + email send logs — never commit
 resident-credentials-*.csv
+email-credentials-log-*.csv
 tsconfig.tsbuildinfo
 
 # Guide build artefacts (the PDF itself is committed)
