@@ -65,6 +65,8 @@ export function AdminResidents() {
     password: string;
   } | null>(null);
   const [editing, setEditing] = React.useState<Resident | null>(null);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [sendingGuide, setSendingGuide] = React.useState(false);
 
   const load = React.useCallback(async () => {
     try {
@@ -152,6 +154,35 @@ export function AdminResidents() {
       setBusyId(null);
     }
   };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        for (const r of filtered) next.delete(r.id);
+      } else {
+        for (const r of filtered) next.add(r.id);
+      }
+      return next;
+    });
+  };
+
+  const selectedResidents = React.useMemo(
+    () => (data ? data.residents.filter((r) => selected.has(r.id)) : []),
+    [data, selected]
+  );
 
   const saveEmail = async (r: Resident, email: string) => {
     setBusyId(r.id);
@@ -250,6 +281,24 @@ export function AdminResidents() {
         </div>
       </div>
 
+      {/* Bulk-action bar */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-accent/60 px-4 py-2.5">
+          <p className="text-sm font-medium text-foreground">
+            {selected.size} selected
+          </p>
+          <Button size="sm" onClick={() => setSendingGuide(true)}>
+            Send user guide…
+          </Button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
@@ -263,6 +312,15 @@ export function AdminResidents() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="w-10 py-3 pl-5">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 accent-[hsl(201,96%,38%)]"
+                    />
+                  </th>
                   <th className="px-5 py-3 font-medium">Flat</th>
                   <th className="px-5 py-3 font-medium">Owner</th>
                   <th className="px-5 py-3 font-medium">Username</th>
@@ -275,6 +333,15 @@ export function AdminResidents() {
               <tbody className="divide-y divide-border">
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-muted/40">
+                    <td className="w-10 py-3 pl-5">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select flat ${r.flatNumber}`}
+                        checked={selected.has(r.id)}
+                        onChange={() => toggleSelect(r.id)}
+                        className="h-4 w-4 accent-[hsl(201,96%,38%)]"
+                      />
+                    </td>
                     <td className="tabular px-5 py-3 font-semibold">{r.flatNumber}</td>
                     <td className="max-w-[180px] truncate px-5 py-3 text-muted-foreground">
                       {r.name || "—"}
@@ -335,6 +402,14 @@ export function AdminResidents() {
             {filtered.map((r) => (
               <li key={r.id} className="space-y-2 px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select flat ${r.flatNumber}`}
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleSelect(r.id)}
+                      className="mt-1 h-4 w-4 shrink-0 accent-[hsl(201,96%,38%)]"
+                    />
                   <div className="min-w-0">
                     <p className="tabular font-semibold text-foreground">
                       Flat {r.flatNumber}
@@ -358,6 +433,7 @@ export function AdminResidents() {
                         ? `Last login ${formatDateTime(r.lastLoginAt)}`
                         : "Never logged in"}
                     </p>
+                  </div>
                   </div>
                   <StatusBadge resident={r} />
                 </div>
@@ -397,6 +473,193 @@ export function AdminResidents() {
           onClose={() => setEditing(null)}
         />
       )}
+
+      {sendingGuide && (
+        <SendGuideModal
+          residents={selectedResidents}
+          onClose={(sentAny) => {
+            setSendingGuide(false);
+            if (sentAny) setSelected(new Set());
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------- Send guide (bulk email) -------------------------- */
+
+const GUIDE_CHUNK = 15;
+
+function SendGuideModal({
+  residents,
+  onClose,
+}: {
+  residents: Resident[];
+  onClose: (sentAny: boolean) => void;
+}) {
+  const [phase, setPhase] = React.useState<"confirm" | "sending" | "done">("confirm");
+  const [done, setDone] = React.useState(0);
+  const [results, setResults] = React.useState<
+    { flat: string; email: string; status: string; error?: string }[]
+  >([]);
+
+  const withEmail = residents.filter((r) => r.email);
+  const noEmail = residents.filter((r) => !r.email);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && phase !== "sending" && onClose(phase === "done");
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, phase]);
+
+  const send = async () => {
+    setPhase("sending");
+    const all: typeof results = [];
+    const ids = withEmail.map((r) => r.id);
+    for (let i = 0; i < ids.length; i += GUIDE_CHUNK) {
+      const chunk = ids.slice(i, i + GUIDE_CHUNK);
+      try {
+        const res = await fetch("/api/residents/send-guide", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: chunk }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          for (const id of chunk) {
+            const r = withEmail.find((x) => x.id === id)!;
+            all.push({ flat: r.flatNumber, email: r.email, status: "failed", error: body.error });
+          }
+        } else {
+          all.push(...body.results);
+        }
+      } catch {
+        for (const id of chunk) {
+          const r = withEmail.find((x) => x.id === id)!;
+          all.push({ flat: r.flatNumber, email: r.email, status: "failed", error: "network error" });
+        }
+      }
+      setDone(Math.min(i + GUIDE_CHUNK, ids.length));
+      setResults([...all]);
+    }
+    setPhase("done");
+  };
+
+  const sent = results.filter((r) => r.status === "sent").length;
+  const failed = results.filter((r) => r.status === "failed");
+  const skipped = results.filter((r) => r.status === "no-email").length + noEmail.length;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl animate-fade-in">
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-foreground">Send user guide</h2>
+            <p className="text-sm text-muted-foreground">
+              Emails the guide PDF with sign-in steps.
+            </p>
+          </div>
+          {phase !== "sending" && (
+            <button
+              onClick={() => onClose(phase === "done")}
+              aria-label="Close"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+            >
+              <IconX className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        {phase === "confirm" && (
+          <>
+            <ul className="mb-4 space-y-1.5 rounded-lg bg-muted/50 p-3 text-sm">
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Selected</span>
+                <span className="tabular font-medium">{residents.length}</span>
+              </li>
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Will be emailed</span>
+                <span className="tabular font-medium text-success">{withEmail.length}</span>
+              </li>
+              {noEmail.length > 0 && (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">No email — skipped</span>
+                  <span className="tabular font-medium text-warning">
+                    {noEmail.length} ({noEmail.map((r) => r.flatNumber).join(", ")})
+                  </span>
+                </li>
+              )}
+            </ul>
+            <div className="flex gap-2">
+              <Button
+                size="md"
+                className="flex-1"
+                disabled={withEmail.length === 0}
+                onClick={send}
+              >
+                Send to {withEmail.length} resident{withEmail.length === 1 ? "" : "s"}
+              </Button>
+              <Button size="md" variant="outline" onClick={() => onClose(false)}>
+                Cancel
+              </Button>
+            </div>
+          </>
+        )}
+
+        {phase === "sending" && (
+          <div className="space-y-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" /> Sending {done}/{withEmail.length}…
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${(done / Math.max(withEmail.length, 1)) * 100}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Keep this page open until sending finishes.
+            </p>
+          </div>
+        )}
+
+        {phase === "done" && (
+          <>
+            <ul className="mb-4 space-y-1.5 rounded-lg bg-muted/50 p-3 text-sm">
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Sent</span>
+                <span className="tabular font-medium text-success">{sent}</span>
+              </li>
+              {failed.length > 0 && (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">Failed</span>
+                  <span className="tabular font-medium text-destructive">{failed.length}</span>
+                </li>
+              )}
+              {skipped > 0 && (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">Skipped (no email)</span>
+                  <span className="tabular font-medium">{skipped}</span>
+                </li>
+              )}
+            </ul>
+            {failed.length > 0 && (
+              <div className="mb-4 max-h-32 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs">
+                {failed.map((f, i) => (
+                  <p key={i} className="text-destructive">
+                    Flat {f.flat} ({f.email}): {f.error || "failed"}
+                  </p>
+                ))}
+              </div>
+            )}
+            <Button size="md" className="w-full" onClick={() => onClose(true)}>
+              Done
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

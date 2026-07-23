@@ -29,11 +29,18 @@ function getTransporter(): Transporter {
   return cached;
 }
 
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export async function sendMail(opts: {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  attachments?: MailAttachment[];
 }): Promise<void> {
   const from = process.env.MAIL_FROM || process.env.SMTP_USER;
   await getTransporter().sendMail({
@@ -42,5 +49,6 @@ export async function sendMail(opts: {
     subject: opts.subject,
     text: opts.text,
     html: opts.html,
+    attachments: opts.attachments,
   });
 }
