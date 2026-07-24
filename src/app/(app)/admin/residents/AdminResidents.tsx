@@ -398,7 +398,21 @@ export function AdminResidents() {
           </div>
 
           {/* Mobile list */}
-          <ul className="divide-y divide-border md:hidden">
+          <div className="md:hidden">
+            {/* Select-all row (the desktop equivalent lives in the table head) */}
+            <label className="flex items-center gap-2.5 border-b border-border px-4 py-2.5 text-sm font-medium text-muted-foreground">
+              <input
+                type="checkbox"
+                aria-label="Select all shown"
+                checked={allFilteredSelected}
+                onChange={toggleSelectAll}
+                className="h-4 w-4 accent-[hsl(201,96%,38%)]"
+              />
+              {allFilteredSelected
+                ? `All ${filtered.length} selected`
+                : `Select all ${filtered.length}`}
+            </label>
+            <ul className="divide-y divide-border">
             {filtered.map((r) => (
               <li key={r.id} className="space-y-2 px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
@@ -457,7 +471,8 @@ export function AdminResidents() {
                 </div>
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         </Card>
       )}
 
