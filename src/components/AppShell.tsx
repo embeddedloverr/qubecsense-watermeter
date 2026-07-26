@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import type { Role } from "@/lib/session";
+import type { Role, Capability } from "@/lib/session";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import {
@@ -25,12 +25,19 @@ export interface NavUser {
   name: string;
   email: string;
   role: Role;
+  /** Granted capabilities. Undefined means "no filtering" (technician/resident). */
+  caps?: Capability[];
+  siteName?: string;
+  /** True when a superadmin is acting inside a site. */
+  acting?: boolean;
 }
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  /** Hidden unless the user holds this capability. */
+  cap?: Capability;
 }
 
 const techNav: NavItem[] = [
@@ -39,14 +46,14 @@ const techNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
-  { href: "/admin/live-data", label: "Live Data", icon: IconGauge },
-  { href: "/admin/billing", label: "Billing", icon: IconRupee },
+  { href: "/admin/live-data", label: "Live Data", icon: IconGauge, cap: "view_data" },
+  { href: "/admin/billing", label: "Billing", icon: IconRupee, cap: "billing" },
   { href: "/admin", label: "Overview", icon: IconDashboard },
-  { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
-  { href: "/admin/installations", label: "Records", icon: IconHome },
-  { href: "/admin/residents", label: "Residents", icon: IconUsers },
-  { href: "/admin/messages", label: "Messages", icon: IconMessage },
-  { href: "/admin/technicians", label: "Team", icon: IconUsers },
+  { href: "/admin/schedule", label: "Schedule", icon: IconCalendar, cap: "schedule" },
+  { href: "/admin/installations", label: "Records", icon: IconHome, cap: "records" },
+  { href: "/admin/residents", label: "Residents", icon: IconUsers, cap: "residents" },
+  { href: "/admin/messages", label: "Messages", icon: IconMessage, cap: "messaging" },
+  { href: "/admin/technicians", label: "Team", icon: IconUsers, cap: "technicians" },
 ];
 
 const residentNav: NavItem[] = [
@@ -63,12 +70,20 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const nav =
-    user.role === "admin"
+  const baseNav =
+    user.role === "admin" || user.role === "superadmin"
       ? adminNav
       : user.role === "resident"
         ? residentNav
         : techNav;
+
+  // Hide anything the admin has not been granted. caps undefined means the
+  // role has no capability model (technician / resident), so show everything.
+  const nav = user.caps
+    ? baseNav.filter((i) => !i.cap || user.caps!.includes(i.cap))
+    : baseNav;
+
+  const can = (c: Capability) => !user.caps || user.caps.includes(c);
 
   const isActive = (href: string) =>
     pathname === href ||
@@ -85,8 +100,11 @@ export function AppShell({
 
   // Live unread-message badge on the admin Messages nav item.
   const [unread, setUnread] = React.useState(0);
+  const canMessage = can("messaging");
   React.useEffect(() => {
-    if (user.role !== "admin") return;
+    if (user.role !== "admin" && user.role !== "superadmin") return;
+    // Without the capability this would 403 every 20 seconds.
+    if (!canMessage) return;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -104,17 +122,45 @@ export function AppShell({
       clearInterval(id);
     };
     // Re-check when navigating (e.g. after opening a thread marks it read).
-  }, [user.role, pathname]);
+  }, [user.role, canMessage, pathname]);
 
   const badgeFor = (href: string) =>
     href === "/admin/messages" && unread > 0 ? unread : 0;
 
+  const exitSite = async () => {
+    await fetch("/api/session/site", { method: "DELETE" });
+    router.replace("/superadmin");
+    router.refresh();
+  };
+
   return (
     <div className="min-h-dvh">
+      {/* A superadmin is looking at someone else's site — make that obvious. */}
+      {user.acting && (
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-warning px-4 py-2 text-center text-sm font-medium text-warning-foreground">
+          <span>
+            Viewing <strong>{user.siteName || "a site"}</strong> as superadmin
+          </span>
+          <button
+            onClick={exitSite}
+            className="rounded-md bg-black/15 px-2.5 py-0.5 text-xs font-semibold hover:bg-black/25"
+          >
+            Exit to all sites
+          </button>
+        </div>
+      )}
+
       {/* Top bar */}
       <header className="sticky top-0 z-40 border-b border-border bg-card/85 backdrop-blur supports-[backdrop-filter]:bg-card/70">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-          <Logo />
+          <div className="flex items-center gap-2">
+            <Logo />
+            {user.siteName && (
+              <span className="hidden truncate rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground lg:inline">
+                {user.siteName}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5">
             {/* Desktop nav */}
             <nav className="mr-1 hidden items-center gap-1 md:flex">

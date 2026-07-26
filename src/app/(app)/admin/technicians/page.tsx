@@ -1,8 +1,10 @@
+import { guardPage } from "@/lib/guard";
 import { AdminTechnicians } from "./AdminTechnicians";
 
 export const dynamic = "force-dynamic";
 
-export default function TechniciansPage() {
+export default async function TechniciansPage() {
+  await guardPage("technicians");
   return (
     <div className="space-y-4">
       <div>

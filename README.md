@@ -258,6 +258,43 @@ npm run migrate:multisite -- --phase=drop-legacy --apply --confirm=rosalyn-21
 
 That step refuses to run unless the replacement compound indexes already exist.
 
+## 👑 Superadmin
+
+The superadmin sits above sites: they create and monitor buildings and control
+what each site admin may do.
+
+```bash
+npm run create:superadmin -- --email=you@example.com --name="Your Name"
+```
+
+With no `--password` a strong one is generated and printed once. A superadmin
+has **no home site** — they pick one from the dashboard.
+
+At **/superadmin**:
+
+- **Overview** — every site in one view: flats, residents, meters reporting,
+  silent meters, last data received, consumption and billing month-to-date,
+  unread messages, and an API-health pill per site. One upstream call per site,
+  run with `Promise.allSettled` so a single bad key degrades that row rather
+  than blanking the page.
+- **Sites** — create a site (name, slug, resident username prefix, its own
+  `dataApiUrl` + `dataApiKey`), edit settings, and **Test connection** before
+  trusting the credentials. The API key is encrypted at rest and only ever
+  shown masked.
+- **Per-site view** — **Records** and **Technicians** live here, rendered by
+  the very same components the site admin sees.
+- **Admins** — a capability grid per admin per site: *Live data, Exports,
+  Billing, Residents, Messaging, Records, Schedule, Technicians*. Toggling one
+  takes effect immediately (capabilities are re-read from the database on every
+  request, not trusted from the session token).
+
+**Open site** re-mints the session with that site's context and drops the
+superadmin into the normal admin UI, with an amber banner showing which site
+they are in and an **Exit** button.
+
+> A site admin still sees Records and Technicians in their own nav **if granted**
+> those capabilities — the superadmin view is an addition, not a move away.
+
 ## 🔁 Re-seeding / updating flats
 
 `npm run seed` is **idempotent** — it upserts flats (won't duplicate) and only

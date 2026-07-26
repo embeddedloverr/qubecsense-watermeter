@@ -1,8 +1,10 @@
+import { guardPage } from "@/lib/guard";
 import { AdminLiveData } from "./AdminLiveData";
 
 export const dynamic = "force-dynamic";
 
-export default function AdminLiveDataPage() {
+export default async function AdminLiveDataPage() {
+  await guardPage("view_data");
   return (
     <div className="space-y-4">
       <div>

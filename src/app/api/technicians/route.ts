@@ -7,8 +7,12 @@ import { validatePassword } from "@/lib/password";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const g = await guard("technicians");
+export async function GET(req: NextRequest) {
+  // ?site=<id> lets a superadmin read another site's team from the site view.
+  // guard() only honours it when the caller actually has access to that site.
+  const g = await guard("technicians", {
+    siteId: req.nextUrl.searchParams.get("site") || undefined,
+  });
   if (!g.ok) return g.res;
 
   await connectDB();
@@ -21,7 +25,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const g = await guard("technicians");
+  const g = await guard("technicians", {
+    siteId: req.nextUrl.searchParams.get("site") || undefined,
+  });
   if (!g.ok) return g.res;
 
   try {

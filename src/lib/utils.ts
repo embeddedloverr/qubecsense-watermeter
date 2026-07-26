@@ -41,6 +41,7 @@ export function floorOf(flatNumber: string): number {
 
 /** Landing route for a role after login / password change. */
 export function homeFor(role: string): string {
+  if (role === "superadmin") return "/superadmin";
   if (role === "admin") return "/admin/live-data";
   if (role === "resident") return "/resident";
   return "/technician";

@@ -1,8 +1,10 @@
+import { guardPage } from "@/lib/guard";
 import { AdminMessages } from "./AdminMessages";
 
 export const dynamic = "force-dynamic";
 
-export default function AdminMessagesPage() {
+export default async function AdminMessagesPage() {
+  await guardPage("messaging");
   return (
     <div className="space-y-4">
       <div>

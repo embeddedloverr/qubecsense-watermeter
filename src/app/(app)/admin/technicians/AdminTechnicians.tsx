@@ -26,8 +26,11 @@ interface Tech {
   createdAt: string;
 }
 
-export function AdminTechnicians() {
+/** `siteId` is supplied only when mounted in the superadmin site view; the
+ *  admin's own page relies on the site in their session. */
+export function AdminTechnicians({ siteId }: { siteId?: string } = {}) {
   const { toast } = useToast();
+  const qs = siteId ? `?site=${encodeURIComponent(siteId)}` : "";
   const [techs, setTechs] = React.useState<Tech[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -39,10 +42,10 @@ export function AdminTechnicians() {
   const [errors, setErrors] = React.useState<Record<string, string>>({});
 
   const load = React.useCallback(async () => {
-    const d = await fetch("/api/technicians").then((r) => r.json());
+    const d = await fetch(`/api/technicians${qs}`).then((r) => r.json());
     setTechs(d.technicians || []);
     setLoading(false);
-  }, []);
+  }, [qs]);
 
   React.useEffect(() => {
     load();
@@ -59,7 +62,7 @@ export function AdminTechnicians() {
 
     setSaving(true);
     try {
-      const res = await fetch("/api/technicians", {
+      const res = await fetch(`/api/technicians${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, phone, password }),

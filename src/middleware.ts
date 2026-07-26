@@ -32,11 +32,26 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Keep each role inside its own area.
+  const isSuperadmin = session.role === "superadmin";
+
+  // A superadmin browsing /admin is "acting" inside a site, which requires
+  // having entered one (POST /api/session/site). Without that there is no
+  // site context, so send them to pick one.
+  if (pathname.startsWith("/admin") && isSuperadmin && !session.siteId) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/superadmin/sites";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // Keep each role inside its own area. Coarse role gating only — per-site
+  // capability checks need the database, so they live in guard()/guardPage().
   const wrongArea =
-    (pathname.startsWith("/admin") && session.role !== "admin") ||
-    (pathname.startsWith("/technician") && session.role !== "technician") ||
-    (pathname.startsWith("/resident") && session.role !== "resident");
+    pathname.startsWith("/superadmin")
+      ? !isSuperadmin
+      : (pathname.startsWith("/admin") && session.role !== "admin" && !isSuperadmin) ||
+        (pathname.startsWith("/technician") && session.role !== "technician") ||
+        (pathname.startsWith("/resident") && session.role !== "resident");
 
   if (wrongArea) {
     const url = req.nextUrl.clone();

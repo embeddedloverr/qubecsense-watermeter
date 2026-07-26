@@ -23,8 +23,13 @@ export async function GET(req: NextRequest) {
   }
 
   // Technicians see only their own, so they need no records capability.
+  // ?site=<id> lets a superadmin read another site's records from the site
+  // view; guard() only honours it when the caller has access to that site.
+  const explicitSite = req.nextUrl.searchParams.get("site") || undefined;
   const g =
-    session.role === "technician" ? await guardSite() : await guard("records");
+    session.role === "technician"
+      ? await guardSite({ siteId: explicitSite })
+      : await guard("records", { siteId: explicitSite });
   if (!g.ok) return g.res;
 
   await connectDB();

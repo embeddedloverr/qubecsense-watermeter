@@ -1,21 +1,19 @@
-import { guardPage } from "@/lib/guard";
-import { AdminSchedule } from "./AdminSchedule";
+import { NewSiteForm } from "./NewSiteForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function SchedulePage() {
-  await guardPage("schedule");
+export default function NewSitePage() {
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-foreground">
-          Schedule &amp; planning
+          New site
         </h1>
         <p className="text-sm text-muted-foreground">
-          Assign pending flats to technicians by date.
+          Add a building. You can add its meter-data credentials now or later.
         </p>
       </div>
-      <AdminSchedule />
+      <NewSiteForm />
     </div>
   );
 }

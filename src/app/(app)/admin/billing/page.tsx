@@ -1,8 +1,10 @@
+import { guardPage } from "@/lib/guard";
 import { AdminBilling } from "./AdminBilling";
 
 export const dynamic = "force-dynamic";
 
-export default function AdminBillingPage() {
+export default async function AdminBillingPage() {
+  await guardPage("billing");
   return (
     <div className="space-y-4">
       <div className="print:hidden">

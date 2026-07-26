@@ -38,18 +38,21 @@ interface Install {
   remarks?: string;
 }
 
-export function AdminInstallations() {
+/** `siteId` is supplied only when mounted in the superadmin site view; the
+ *  admin's own page relies on the site in their session. */
+export function AdminInstallations({ siteId }: { siteId?: string } = {}) {
   const [items, setItems] = React.useState<Install[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState<Install | null>(null);
 
   React.useEffect(() => {
-    fetch("/api/installations")
+    const qs = siteId ? `?site=${encodeURIComponent(siteId)}` : "";
+    fetch(`/api/installations${qs}`)
       .then((r) => r.json())
       .then((d) => setItems(d.installations || []))
       .finally(() => setLoading(false));
-  }, []);
+  }, [siteId]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
