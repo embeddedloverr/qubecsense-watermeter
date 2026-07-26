@@ -2,6 +2,12 @@ import mongoose, { Schema, model, models } from "mongoose";
 
 export interface IPhoto {
   _id: mongoose.Types.ObjectId;
+  /**
+   * Owning site. Photos have no flatNumber, so the backfill resolves this by
+   * walking Installation.kitchen/bathroom.photoId and signatureId. Needed so
+   * /api/photos/[id] can be scoped — it is currently readable by any user.
+   */
+  siteId?: mongoose.Types.ObjectId;
   kind: "kitchen" | "bathroom" | "signature";
   contentType: string;
   size: number;
@@ -11,6 +17,7 @@ export interface IPhoto {
 
 const PhotoSchema = new Schema<IPhoto>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
     kind: {
       type: String,
       enum: ["kitchen", "bathroom", "signature"],

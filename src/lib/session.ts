@@ -4,7 +4,11 @@ import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE = "qs_session";
 
-export type Role = "admin" | "technician" | "resident";
+/**
+ * Single source of truth for roles — models/User.ts re-exports this rather
+ * than declaring its own copy, so the two can never drift.
+ */
+export type Role = "superadmin" | "admin" | "technician" | "resident";
 
 export interface SessionPayload {
   sub: string;

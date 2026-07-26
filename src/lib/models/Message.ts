@@ -4,6 +4,7 @@ import mongoose, { Schema, model, models } from "mongoose";
 
 export interface IMessage {
   _id: mongoose.Types.ObjectId;
+  siteId?: mongoose.Types.ObjectId;
   flatNumber: string;
   sender: "resident" | "admin";
   senderName: string;
@@ -18,6 +19,7 @@ export interface IMessage {
 
 const MessageSchema = new Schema<IMessage>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
     flatNumber: { type: String, required: true, index: true },
     sender: { type: String, enum: ["resident", "admin"], required: true },
     senderName: { type: String, default: "" },

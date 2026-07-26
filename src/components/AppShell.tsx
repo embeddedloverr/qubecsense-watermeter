@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import type { Role } from "@/lib/session";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import {
@@ -23,7 +24,7 @@ import {
 export interface NavUser {
   name: string;
   email: string;
-  role: "admin" | "technician" | "resident";
+  role: Role;
 }
 
 interface NavItem {

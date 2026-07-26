@@ -7,6 +7,7 @@ export interface IMeter {
 
 export interface IInstallation {
   _id: mongoose.Types.ObjectId;
+  siteId?: mongoose.Types.ObjectId;
   flatNumber: string;
   floor: number;
   ownerName: string;
@@ -35,10 +36,11 @@ const MeterSchema = new Schema<IMeter>(
 
 const InstallationSchema = new Schema<IInstallation>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
     // No `index: true` here — it would generate the same index name
-    // ("flatNumber_1") as the explicit unique index declared below, and
-    // MongoDB rejects the second declaration with IndexOptionsConflict.
-    // That is why the unique constraint was never actually created.
+    // ("flatNumber_1") as the explicit index declared below, and MongoDB
+    // rejects the second declaration with IndexOptionsConflict. That is why
+    // the intended unique constraint was never actually created.
     flatNumber: { type: String, required: true },
     floor: { type: Number, default: 0 },
     ownerName: { type: String, default: "" },
@@ -57,8 +59,10 @@ const InstallationSchema = new Schema<IInstallation>(
   { timestamps: true }
 );
 
-// One flat is installed once. Remove this if re-installs are allowed.
-InstallationSchema.index({ flatNumber: 1 }, { unique: true });
+// One flat is installed once, within its site. Remove if re-installs are
+// allowed. (The old global {flatNumber} unique index never existed — see the
+// note above — so this compound index is what finally enforces the rule.)
+InstallationSchema.index({ siteId: 1, flatNumber: 1 }, { unique: true });
 
 export const Installation =
   models.Installation ||

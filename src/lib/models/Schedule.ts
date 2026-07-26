@@ -2,6 +2,7 @@ import mongoose, { Schema, model, models } from "mongoose";
 
 export interface ISchedule {
   _id: mongoose.Types.ObjectId;
+  siteId?: mongoose.Types.ObjectId;
   flatNumber: string;
   floor: number;
   ownerName: string;
@@ -16,6 +17,7 @@ export interface ISchedule {
 
 const ScheduleSchema = new Schema<ISchedule>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
     flatNumber: { type: String, required: true, index: true },
     floor: { type: Number, default: 0 },
     ownerName: { type: String, default: "" },

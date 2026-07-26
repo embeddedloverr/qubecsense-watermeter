@@ -224,6 +224,40 @@ It checks every resident with an active budget, and emails each one **once
 per period** while they remain over the limit (a new week/month re-arms the
 alert). Changing or toggling the alert also re-arms it.
 
+## 🏢 Multi-site migration
+
+The app is being moved from a single hardcoded building to multiple **sites**
+(Rosalyn-21 becomes site #1). Every tenant document carries a `siteId`.
+
+Run the migration **before** deploying site-scoped code — the backfill is inert
+against older code, but scoped code against un-backfilled data matches nothing:
+
+```bash
+mongodump --uri="$MONGODB_URI" --out=./backup-$(date +%F)   # always first
+
+npm run migrate:multisite -- --phase=data                   # dry run, prints counts
+npm run migrate:multisite -- --phase=data --apply           # backfill siteId
+npm run migrate:multisite -- --phase=indexes --apply        # create compound indexes
+
+git pull && npm run build && pm2 restart qubecsense         # then deploy
+```
+
+`--phase=data` creates the default site from the current env (`SITE_NAME`,
+`SITE_SLUG`, `SITE_PROJECT`, `RESIDENT_USERNAME_PREFIX`), captures
+`DATA_API_URL`/`DATA_API_KEY` onto it (the key encrypted at rest), backfills
+every collection, and grants existing admins all capabilities. It is
+**idempotent** — re-running changes nothing.
+
+Index policy is **create-then-drop**: the legacy global unique indexes stay in
+place alongside the new compound ones, which is safe while there is one site.
+Only immediately before onboarding site #2:
+
+```bash
+npm run migrate:multisite -- --phase=drop-legacy --apply --confirm=rosalyn-21
+```
+
+That step refuses to run unless the replacement compound indexes already exist.
+
 ## 🔁 Re-seeding / updating flats
 
 `npm run seed` is **idempotent** — it upserts flats (won't duplicate) and only

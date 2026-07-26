@@ -9,6 +9,7 @@ export interface ISlab {
 
 export interface ITariff {
   _id: mongoose.Types.ObjectId;
+  siteId?: mongoose.Types.ObjectId;
   key: string;
   slabs: ISlab[];
   /** Fixed monthly charge per flat (meter/service charge), in rupees. */
@@ -27,11 +28,17 @@ const SlabSchema = new Schema<ISlab>(
 
 const TariffSchema = new Schema<ITariff>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
+    // LEGACY global unique — coexists with the compound index below while
+    // there is one site; dropped by `--phase=drop-legacy` before site #2.
     key: { type: String, required: true, unique: true, default: "default" },
     slabs: { type: [SlabSchema], default: [] },
     fixedCharge: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );
+
+// One tariff per key per site (leaves room for named tariffs later).
+TariffSchema.index({ siteId: 1, key: 1 }, { unique: true });
 
 export const Tariff = models.Tariff || model<ITariff>("Tariff", TariffSchema);

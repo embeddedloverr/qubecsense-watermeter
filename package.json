@@ -10,6 +10,7 @@
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
     "reset:residents": "node scripts/reset-resident-passwords.mjs",
+    "migrate:multisite": "node scripts/migrate-multisite.mjs",
     "email:credentials": "node scripts/email-credentials.mjs",
     "guide": "node scripts/make-resident-guide.mjs"
   },

@@ -1,9 +1,47 @@
 import mongoose, { Schema, model, models } from "mongoose";
 
-export type Role = "admin" | "technician" | "resident";
+// Declared in session.ts (which middleware also uses) so there is one
+// definition rather than two that silently diverge.
+export type { Role } from "../session";
+import type { Role } from "../session";
+
+/** What an admin may do within a site. Maps 1:1 to nav items. */
+export type Capability =
+  | "view_data"
+  | "exports"
+  | "billing"
+  | "residents"
+  | "messaging"
+  | "records"
+  | "schedule"
+  | "technicians";
+
+export const ALL_CAPABILITIES: Capability[] = [
+  "view_data",
+  "exports",
+  "billing",
+  "residents",
+  "messaging",
+  "records",
+  "schedule",
+  "technicians",
+];
+
+/** One site an admin can act in, and what they may do there. */
+export interface ISiteAccess {
+  siteId: mongoose.Types.ObjectId;
+  capabilities: Capability[];
+}
 
 export interface IUser {
   _id: mongoose.Types.ObjectId;
+  /**
+   * Home site. Required in practice for residents and technicians; for an
+   * admin it is their default site. Null for a superadmin, who has no site.
+   */
+  siteId?: mongoose.Types.ObjectId | null;
+  /** Per-site capability grants for admins. Superadmins ignore this. */
+  siteAccess?: ISiteAccess[];
   name: string;
   /** Login handle for residents, e.g. "rosalyn_501". Optional for admin/tech. */
   username?: string;
@@ -34,8 +72,18 @@ export interface IUser {
   updatedAt: Date;
 }
 
+const SiteAccessSchema = new Schema<ISiteAccess>(
+  {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", required: true },
+    capabilities: [{ type: String }],
+  },
+  { _id: false }
+);
+
 const UserSchema = new Schema<IUser>(
   {
+    siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
+    siteAccess: { type: [SiteAccessSchema], default: undefined },
     name: { type: String, required: true, trim: true },
     username: {
       type: String,
@@ -54,7 +102,7 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ["admin", "technician", "resident"],
+      enum: ["superadmin", "admin", "technician", "resident"],
       default: "technician",
     },
     flatNumber: { type: String, trim: true, index: true },
@@ -74,4 +122,11 @@ const UserSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
+// Admin lookups by granted site.
+UserSchema.index({ "siteAccess.siteId": 1 });
+
+// NOTE: username and email stay GLOBALLY unique. Because each site has a
+// unique residentUsernamePrefix, "rosalyn_101" and "greenwood_101" are already
+// distinct — so no compound migration is needed on the users collection (the
+// one holding live resident logins), and the login page needs no site picker.
 export const User = models.User || model<IUser>("User", UserSchema);
