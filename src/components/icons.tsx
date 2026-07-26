@@ -160,3 +160,10 @@ export const IconRupee = (p: IconProps) => (
     <path d="M9 3c4 0 6 1.5 6 5 0 3.5-2 5-6 5H8l8 8" />
   </svg>
 );
+
+export const IconMessage = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 5h16v11H8l-4 4V5z" />
+    <path d="M8 9h8M8 12h5" />
+  </svg>
+);

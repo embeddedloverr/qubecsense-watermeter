@@ -17,6 +17,8 @@ import {
   CardTitle,
   Button,
   Input,
+  Textarea,
+  Spinner,
 } from "@/components/ui";
 import {
   IconDroplet,
@@ -771,6 +773,204 @@ export function ResidentView({
           </ul>
         </CardContent>
       </Card>
+
+      {/* Contact the admin / report a problem */}
+      <ContactCard />
     </div>
+  );
+}
+
+/* --------------------------- Contact admin / chat --------------------------- */
+
+interface ChatMessage {
+  id: string;
+  sender: "resident" | "admin";
+  senderName: string;
+  body: string;
+  category: string | null;
+  createdAt: string;
+}
+
+const PROBLEMS = [
+  "Suspected leak",
+  "Meter not working",
+  "Billing question",
+  "Other",
+];
+
+function ContactCard() {
+  const { toast } = useToast();
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [body, setBody] = React.useState("");
+  const [category, setCategory] = React.useState<string | null>(null);
+  const [sending, setSending] = React.useState(false);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const taRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const load = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/resident/messages", { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok) setMessages(data.messages || []);
+    } catch {
+      /* ignore transient errors */
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    load();
+    const id = setInterval(load, 12_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  React.useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  const pickProblem = (p: string) => {
+    setCategory(p);
+    setBody((b) => (b ? b : `${p}: `));
+    taRef.current?.focus();
+  };
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = body.trim();
+    if (!text) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/resident/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text, category }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || "Could not send.", "error");
+        return;
+      }
+      setMessages((m) => [...m, data.message]);
+      setBody("");
+      setCategory(null);
+    } catch {
+      toast("Network error. Please try again.", "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Contact the manager</CardTitle>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Report a problem or ask a question. You&apos;ll get a reply here and by
+          email.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Report-a-problem quick buttons */}
+        <div className="flex flex-wrap gap-1.5">
+          {PROBLEMS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => pickProblem(p)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                category === p
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Thread */}
+        <div
+          ref={scrollRef}
+          className="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3"
+        >
+          {!loaded ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" /> Loading…
+            </div>
+          ) : messages.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No messages yet. Pick a problem above or type below to start.
+            </p>
+          ) : (
+            messages.map((m) => (
+              <div
+                key={m.id}
+                className={`flex ${m.sender === "resident" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+                    m.sender === "resident"
+                      ? "rounded-br-sm bg-primary text-primary-foreground"
+                      : "rounded-bl-sm bg-card text-foreground shadow-sm"
+                  }`}
+                >
+                  {m.category && (
+                    <p
+                      className={`mb-0.5 text-[11px] font-semibold ${
+                        m.sender === "resident"
+                          ? "text-primary-foreground/80"
+                          : "text-primary"
+                      }`}
+                    >
+                      {m.category}
+                    </p>
+                  )}
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                  <p
+                    className={`mt-0.5 text-[10px] ${
+                      m.sender === "resident"
+                        ? "text-primary-foreground/70"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {m.sender === "admin" ? "Manager · " : ""}
+                    {new Date(m.createdAt).toLocaleString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Composer */}
+        <form onSubmit={send} className="space-y-2">
+          <Textarea
+            ref={taRef}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Type your message…"
+            rows={2}
+            maxLength={2000}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              size="md"
+              loading={sending}
+              disabled={!body.trim()}
+            >
+              Send
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

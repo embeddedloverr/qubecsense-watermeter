@@ -17,6 +17,7 @@ import {
   IconRupee,
   IconDroplet,
   IconPen,
+  IconMessage,
 } from "./icons";
 
 export interface NavUser {
@@ -43,6 +44,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar },
   { href: "/admin/installations", label: "Records", icon: IconHome },
   { href: "/admin/residents", label: "Residents", icon: IconUsers },
+  { href: "/admin/messages", label: "Messages", icon: IconMessage },
   { href: "/admin/technicians", label: "Team", icon: IconUsers },
 ];
 
@@ -80,6 +82,32 @@ export function AppShell({
     router.refresh();
   };
 
+  // Live unread-message badge on the admin Messages nav item.
+  const [unread, setUnread] = React.useState(0);
+  React.useEffect(() => {
+    if (user.role !== "admin") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/messages/unread", { cache: "no-store" });
+        const data = await res.json();
+        if (!cancelled && res.ok) setUnread(data.count || 0);
+      } catch {
+        /* ignore */
+      }
+    };
+    poll();
+    const id = setInterval(poll, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // Re-check when navigating (e.g. after opening a thread marks it read).
+  }, [user.role, pathname]);
+
+  const badgeFor = (href: string) =>
+    href === "/admin/messages" && unread > 0 ? unread : 0;
+
   return (
     <div className="min-h-dvh">
       {/* Top bar */}
@@ -104,6 +132,11 @@ export function AppShell({
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {badgeFor(item.href) > 0 && (
+                      <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-destructive-foreground">
+                        {badgeFor(item.href)}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -146,12 +179,17 @@ export function AppShell({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                  "relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
                   active ? "text-primary" : "text-muted-foreground"
                 )}
               >
                 <Icon className={cn("h-6 w-6", active && "stroke-[2.1]")} />
                 {item.label}
+                {badgeFor(item.href) > 0 && (
+                  <span className="absolute right-1/2 top-1 translate-x-3.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
+                    {badgeFor(item.href)}
+                  </span>
+                )}
               </Link>
             );
           })}
