@@ -30,6 +30,13 @@ export async function connectDB(): Promise<typeof mongoose> {
     cached.promise = mongoose
       .connect(MONGODB_URI as string, {
         bufferCommands: false,
+        // Index builds are managed explicitly by scripts/ in production, so a
+        // failed build surfaces there instead of being swallowed by a
+        // connection error handler nobody reads. Set MONGOOSE_AUTO_INDEX=true
+        // to opt back in (e.g. bootstrapping a brand-new deployment).
+        autoIndex:
+          process.env.MONGOOSE_AUTO_INDEX === "true" ||
+          process.env.NODE_ENV !== "production",
       })
       .then((m) => m);
   }

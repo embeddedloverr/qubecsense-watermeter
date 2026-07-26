@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Tariff } from "@/lib/models/Tariff";
-import { getSession } from "@/lib/auth";
+import { requireAdmin } from "@/lib/guard";
 import { validateSlabs, type Slab } from "@/lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-async function requireAdmin() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") return null;
-  return session;
-}
 
 export async function GET() {
   const admin = await requireAdmin();

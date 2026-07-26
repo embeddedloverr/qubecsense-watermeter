@@ -35,7 +35,11 @@ const MeterSchema = new Schema<IMeter>(
 
 const InstallationSchema = new Schema<IInstallation>(
   {
-    flatNumber: { type: String, required: true, index: true },
+    // No `index: true` here — it would generate the same index name
+    // ("flatNumber_1") as the explicit unique index declared below, and
+    // MongoDB rejects the second declaration with IndexOptionsConflict.
+    // That is why the unique constraint was never actually created.
+    flatNumber: { type: String, required: true },
     floor: { type: Number, default: 0 },
     ownerName: { type: String, default: "" },
     ownerEmail: { type: String, default: "" },

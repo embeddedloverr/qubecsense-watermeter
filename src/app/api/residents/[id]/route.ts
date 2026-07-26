@@ -3,7 +3,8 @@ import { randomInt } from "node:crypto";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Flat } from "@/lib/models/Flat";
-import { getSession, hashPassword } from "@/lib/auth";
+import { hashPassword } from "@/lib/auth";
+import { requireAdmin } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,12 +26,6 @@ function randomPassword(len = 10) {
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
   return chars.join("");
-}
-
-async function requireAdmin() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") return null;
-  return session;
 }
 
 async function loadResident(id: string) {

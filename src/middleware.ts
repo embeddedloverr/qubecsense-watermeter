@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+// Single source of truth — a second copy here silently drifts when a new role
+// is added. utils.ts has no Node-only imports, so it is Edge-safe.
+import { homeFor } from "@/lib/utils";
 
 const PUBLIC_PATHS = ["/login", "/manifest.json", "/favicon.ico"];
-
-function homeFor(role: string): string {
-  if (role === "admin") return "/admin/live-data";
-  if (role === "resident") return "/resident";
-  return "/technician";
-}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

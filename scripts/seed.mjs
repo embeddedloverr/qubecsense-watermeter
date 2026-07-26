@@ -103,9 +103,11 @@ async function main() {
   console.log("→ Connecting to MongoDB…");
   await mongoose.connect(MONGODB_URI);
 
-  // Align indexes with the schema (converts the old non-sparse email index
-  // to a sparse one so residents without an email don't collide).
-  await User.syncIndexes();
+  // NOTE: do NOT call syncIndexes() here. It DROPS any index not present in
+  // the duplicated inline schema above, which would silently destroy indexes
+  // this script doesn't know about (e.g. the multi-site compound indexes).
+  // createIndexes() only ever adds, so it is safe to re-run.
+  await User.createIndexes();
 
   // --- Flats ---
   const flats = JSON.parse(

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Message } from "@/lib/models/Message";
 import { Flat } from "@/lib/models/Flat";
-import { getSession } from "@/lib/auth";
+import { requireAdmin } from "@/lib/guard";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
 
 export const runtime = "nodejs";
@@ -17,12 +17,6 @@ function serialise(m: any) {
     category: m.category || null,
     createdAt: new Date(m.createdAt).toISOString(),
   };
-}
-
-async function requireAdmin() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") return null;
-  return session;
 }
 
 // GET /api/messages/<flat> — full thread; marks resident messages read.

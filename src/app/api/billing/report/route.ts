@@ -4,6 +4,7 @@ import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { getSession } from "@/lib/auth";
 import { applySlabs, type Slab } from "@/lib/billing";
+import { fetchLiveData, LiveDataError, envCreds } from "@/lib/liveData";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,9 +19,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const base = process.env.DATA_API_URL;
-  const key = process.env.DATA_API_KEY;
-  if (!base || !key) {
+  if (!envCreds()) {
     return NextResponse.json(
       {
         error:
@@ -58,20 +57,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const url = new URL(base);
-    url.searchParams.set("days", String(Math.min(Math.max(daysBack, 1), 92)));
-    const upstream = await fetch(url.toString(), {
-      headers: { "x-api-key": key },
-      cache: "no-store",
-      signal: AbortSignal.timeout(20000),
+    const data: any = await fetchLiveData({
+      days: Math.min(Math.max(daysBack, 1), 92),
     });
-    const data = await upstream.json().catch(() => null);
-    if (!upstream.ok) {
-      return NextResponse.json(
-        { error: data?.error || `Live data API error (${upstream.status})` },
-        { status: 502 }
-      );
-    }
 
     await connectDB();
     const [tariffDoc, flats] = await Promise.all([
@@ -137,7 +125,12 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("billing report error", err);
     return NextResponse.json(
-      { error: "Could not build the billing report." },
+      {
+        error:
+          err instanceof LiveDataError
+            ? err.message
+            : "Could not build the billing report.",
+      },
       { status: 502 }
     );
   }

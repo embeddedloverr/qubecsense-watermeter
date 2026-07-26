@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
-import { getSession, hashPassword } from "@/lib/auth";
+import { hashPassword } from "@/lib/auth";
+import { requireAdmin } from "@/lib/guard";
 import { validatePassword } from "@/lib/password";
 
 export const runtime = "nodejs";
-
-async function requireAdmin() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") return null;
-  return session;
-}
 
 export async function GET() {
   const admin = await requireAdmin();
