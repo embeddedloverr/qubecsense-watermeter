@@ -655,6 +655,9 @@ export function ResidentView({
                         {m.location || "Meter"}
                       </p>
                       <p className="tabular text-xs text-muted-foreground">
+                        ID {m.registrationId || m.deviceId}
+                      </p>
+                      <p className="tabular text-xs text-muted-foreground">
                         {r ? `Latest ${formatDate(r.date)}` : "No reading"}
                       </p>
                     </div>
