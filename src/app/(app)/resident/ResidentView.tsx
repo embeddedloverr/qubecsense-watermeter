@@ -251,6 +251,92 @@ function HistorySection({
   );
 }
 
+/* ------------------------------ Recent usage -------------------------------- */
+
+/** Trend vs a previous value. For water, using less is good (down = green). */
+function Trend({
+  current,
+  previous,
+  suffix,
+}: {
+  current: number;
+  previous: number | null;
+  suffix: string;
+}) {
+  if (previous == null || previous <= 0) {
+    return <span className="text-xs text-muted-foreground">no prior data</span>;
+  }
+  const diff = current - previous;
+  const pct = Math.round((Math.abs(diff) / previous) * 100);
+  if (pct === 0) {
+    return <span className="text-xs text-muted-foreground">about the same {suffix}</span>;
+  }
+  const up = diff > 0;
+  return (
+    <span
+      className={`text-xs font-medium ${up ? "text-warning" : "text-success"}`}
+    >
+      {up ? "▲" : "▼"} {pct}% {suffix}
+    </span>
+  );
+}
+
+function RecentUsageCard({
+  recent,
+}: {
+  recent: {
+    latestDate: string;
+    latestLitres: number;
+    prevDayLitres: number | null;
+    weekToDate: number;
+    lastWeekSame: number | null;
+  };
+}) {
+  // "Yesterday" if the latest reading is literally yesterday, else "Latest day".
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  const isYesterday = recent.latestDate === y.toISOString().slice(0, 10);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Recent usage</CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border p-4">
+          <p className="text-sm text-muted-foreground">
+            {isYesterday ? "Yesterday" : "Latest day"} ·{" "}
+            {formatDate(recent.latestDate)}
+          </p>
+          <p className="tabular mt-1 text-2xl font-bold text-foreground">
+            {litres(recent.latestLitres)}
+          </p>
+          <p className="mt-0.5">
+            <Trend
+              current={recent.latestLitres}
+              previous={recent.prevDayLitres}
+              suffix="vs day before"
+            />
+          </p>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <p className="text-sm text-muted-foreground">This week so far</p>
+          <p className="tabular mt-1 text-2xl font-bold text-foreground">
+            {litres(recent.weekToDate)}
+          </p>
+          <p className="mt-0.5">
+            <Trend
+              current={recent.weekToDate}
+              previous={recent.lastWeekSame}
+              suffix="vs last week"
+            />
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ------------------------------ Budget / alert ------------------------------ */
 
 type BudgetPeriod = "weekly" | "monthly";
@@ -446,6 +532,7 @@ export function ResidentView({
   tariffConfigured,
   usage,
   budget,
+  recent,
 }: {
   flat: LiveFlat | null;
   dates: string[];
@@ -457,6 +544,13 @@ export function ResidentView({
   tariffConfigured: boolean;
   usage: { weekly: number; monthly: number };
   budget: { enabled: boolean; litres: number | null; period: "weekly" | "monthly" };
+  recent: {
+    latestDate: string;
+    latestLitres: number;
+    prevDayLitres: number | null;
+    weekToDate: number;
+    lastWeekSame: number | null;
+  } | null;
 }) {
   if (!flat || flat.meters.length === 0) {
     return (
@@ -534,6 +628,9 @@ export function ResidentView({
         </Card>
 
       </div>
+
+      {/* Recent usage — latest day + week-over-week */}
+      {recent && <RecentUsageCard recent={recent} />}
 
       {/* Usage alert / budget */}
       <BudgetCard usage={usage} initial={budget} />

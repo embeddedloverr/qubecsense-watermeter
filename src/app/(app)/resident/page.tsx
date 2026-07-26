@@ -5,7 +5,7 @@ import { Tariff } from "@/lib/models/Tariff";
 import { User } from "@/lib/models/User";
 import { fetchLiveData, LiveDataError, type LiveFlat } from "@/lib/liveData";
 import { applySlabs, type Slab } from "@/lib/billing";
-import { usageInPeriod, type BudgetPeriod } from "@/lib/budget";
+import { usageInPeriod, periodRange, type BudgetPeriod } from "@/lib/budget";
 import { Card, CardContent } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
 import { ResidentView } from "./ResidentView";
@@ -74,6 +74,61 @@ export default async function ResidentHome() {
     weekly: usageInPeriod(flatReadings, "weekly"),
     monthly: usageInPeriod(flatReadings, "monthly"),
   };
+
+  // Recent usage: latest day vs the day before, and this-week-so-far vs the
+  // same portion of last week (fair, not partial-vs-full).
+  const byDate = new Map<string, number>();
+  for (const r of flatReadings) {
+    byDate.set(r.date, (byDate.get(r.date) || 0) + r.litres);
+  }
+  const shiftDay = (s: string, n: number): string => {
+    const d = new Date(`${s}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const sortedDates = [...byDate.keys()].sort();
+  const latestDate = sortedDates[sortedDates.length - 1] || null;
+
+  let recent: {
+    latestDate: string;
+    latestLitres: number;
+    prevDayLitres: number | null;
+    weekToDate: number;
+    lastWeekSame: number | null;
+  } | null = null;
+
+  if (latestDate) {
+    const latestLitres = byDate.get(latestDate) || 0;
+    const prevDay = shiftDay(latestDate, -1);
+    const prevDayLitres = byDate.has(prevDay) ? byDate.get(prevDay)! : null;
+
+    const thisMon = periodRange("weekly", new Date(`${latestDate}T00:00:00Z`)).from;
+    const elapsed = Math.round(
+      (Date.parse(latestDate) - Date.parse(thisMon)) / 86_400_000
+    ); // 0-based days from Monday to latest
+    const lastMon = shiftDay(thisMon, -7);
+
+    let weekToDate = 0;
+    let lastWeekSame = 0;
+    // Only a fair comparison if last week has a reading for every day we're
+    // comparing against; otherwise (e.g. data collection only just started)
+    // we'd be comparing more days against fewer and overstate the change.
+    let lastWeekComplete = true;
+    for (let i = 0; i <= elapsed; i++) {
+      weekToDate += byDate.get(shiftDay(thisMon, i)) || 0;
+      const lw = shiftDay(lastMon, i);
+      if (byDate.has(lw)) lastWeekSame += byDate.get(lw)!;
+      else lastWeekComplete = false;
+    }
+
+    recent = {
+      latestDate,
+      latestLitres,
+      prevDayLitres,
+      weekToDate,
+      lastWeekSame: lastWeekComplete ? lastWeekSame : null,
+    };
+  }
   const budget = {
     enabled: (userDoc as any)?.budgetEnabled === true,
     litres: (userDoc as any)?.budgetLitres ?? null,
@@ -114,6 +169,7 @@ export default async function ResidentHome() {
           tariffConfigured={slabs.length > 0}
           usage={usage}
           budget={budget}
+          recent={recent}
         />
       )}
     </div>
