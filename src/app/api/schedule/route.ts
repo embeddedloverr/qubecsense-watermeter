@@ -4,6 +4,7 @@ import { Schedule } from "@/lib/models/Schedule";
 import { Flat } from "@/lib/models/Flat";
 import { User } from "@/lib/models/User";
 import { getSession } from "@/lib/auth";
+import { guard, guardSite } from "@/lib/guard";
 import { floorOf } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -15,10 +16,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (session.role === "resident") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const g =
+    session.role === "technician" ? await guardSite() : await guard("schedule");
+  if (!g.ok) return g.res;
+
   await connectDB();
 
   const { searchParams } = new URL(req.url);
-  const filter: Record<string, unknown> = {};
+  const filter: Record<string, unknown> = { siteId: g.ctx.siteId };
 
   if (session.role === "technician") {
     filter.technicianId = session.sub;
@@ -38,10 +46,9 @@ export async function GET(req: NextRequest) {
 
 /** Admin assigns one or more flats to a technician on a date. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const gp = await guard("schedule");
+  if (!gp.ok) return gp.res;
+  const siteId = gp.ctx.siteId;
 
   try {
     const { flatNumbers, technicianId, scheduledDate, notes } =
@@ -61,24 +68,29 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
 
-    const tech = await User.findById(technicianId).lean<{
-      _id: any;
-      name: string;
-      role: string;
-    }>();
-    if (!tech || tech.role !== "technician") {
+    // Scoped so another site's technician cannot be assigned work here.
+    const tech = await User.findOne({
+      _id: technicianId,
+      role: "technician",
+      siteId,
+    }).lean<{ _id: any; name: string; role: string }>();
+    if (!tech) {
       return NextResponse.json(
         { error: "Selected technician is invalid." },
         { status: 400 }
       );
     }
 
-    const flats = await Flat.find({ flatNumber: { $in: flatNumbers } }).lean();
+    const flats = await Flat.find({
+      flatNumber: { $in: flatNumbers },
+      siteId,
+    }).lean();
     const flatMap = new Map(flats.map((f: any) => [f.flatNumber, f]));
 
     const docs = flatNumbers.map((fn: string) => {
       const f: any = flatMap.get(fn);
       return {
+        siteId,
         flatNumber: fn,
         floor: f?.floor ?? floorOf(fn),
         ownerName: f?.ownerName ?? "",
@@ -106,10 +118,8 @@ export async function POST(req: NextRequest) {
 
 /** Admin removes a schedule entry. */
 export async function DELETE(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("schedule");
+  if (!g.ok) return g.res;
 
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -118,6 +128,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   await connectDB();
-  await Schedule.findByIdAndDelete(id);
+  // Scoped so an id from another site cannot be deleted.
+  await Schedule.findOneAndDelete({ _id: id, siteId: g.ctx.siteId });
   return NextResponse.json({ ok: true });
 }

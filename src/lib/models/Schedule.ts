@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models } from "mongoose";
+import { tenantScope } from "../tenantScope";
 
 export interface ISchedule {
   _id: mongoose.Types.ObjectId;
@@ -33,6 +34,8 @@ const ScheduleSchema = new Schema<ISchedule>(
   },
   { timestamps: true }
 );
+
+ScheduleSchema.plugin(tenantScope, { name: "Schedule" });
 
 export const Schedule =
   models.Schedule || model<ISchedule>("Schedule", ScheduleSchema);

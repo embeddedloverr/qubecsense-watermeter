@@ -54,6 +54,40 @@ export function envCreds(): LiveDataCreds | null {
   return baseUrl && apiKey ? { baseUrl, apiKey } : null;
 }
 
+/**
+ * Credentials for a site, falling back to env when the site has none stored.
+ * The fallback is what lets the original site keep working before its keys are
+ * entered in the superadmin UI; it goes away once every site has its own.
+ */
+export async function resolveSiteCreds(
+  siteId: string | { toString(): string }
+): Promise<LiveDataCreds> {
+  // Imported lazily so Edge/middleware never pulls Mongoose in transitively.
+  const { connectDB } = await import("./db");
+  const { Site } = await import("./models/Site");
+  const { decryptSecret } = await import("./crypto");
+
+  await connectDB();
+  const site = await Site.findById(String(siteId))
+    .select("+dataApiKey dataApiUrl name")
+    .lean<{ dataApiUrl?: string; dataApiKey?: string; name?: string }>();
+
+  if (site?.dataApiUrl && site?.dataApiKey) {
+    return {
+      baseUrl: site.dataApiUrl,
+      apiKey: decryptSecret(site.dataApiKey),
+    };
+  }
+
+  const fallback = envCreds();
+  if (!fallback) {
+    throw new LiveDataError(
+      `No meter-data credentials for site ${site?.name || siteId}. Add them in the site settings.`
+    );
+  }
+  return fallback;
+}
+
 export async function fetchLiveData(
   opts: {
     days?: number;

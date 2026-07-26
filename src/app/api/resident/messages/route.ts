@@ -29,13 +29,14 @@ export async function GET() {
   if (!flat) return NextResponse.json({ messages: [] });
 
   await connectDB();
-  const messages = await Message.find({ flatNumber: flat })
+  const siteId = session.siteId;
+  const messages = await Message.find({ flatNumber: flat, siteId })
     .sort({ createdAt: 1 })
     .lean();
 
   // Mark admin messages as read by the resident.
   await Message.updateMany(
-    { flatNumber: flat, sender: "admin", readByResident: false },
+    { flatNumber: flat, siteId, sender: "admin", readByResident: false },
     { $set: { readByResident: true } }
   );
 
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
     const msg = await Message.create({
+      siteId: session.siteId,
       flatNumber: flat,
       sender: "resident",
       senderName: session.name,
@@ -78,7 +80,10 @@ export async function POST(req: NextRequest) {
     const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER;
     if (isMailConfigured() && to) {
       const appUrl = (process.env.APP_URL || "https://meters.qubecsense.com").replace(/\/$/, "");
-      const flatDoc = await Flat.findOne({ flatNumber: flat }, { ownerName: 1 }).lean();
+      const flatDoc = await Flat.findOne(
+        { flatNumber: flat, siteId: session.siteId },
+        { ownerName: 1 }
+      ).lean();
       const who = (flatDoc as any)?.ownerName || session.name || `Flat ${flat}`;
       const tag = category ? `[${category}] ` : "";
       sendMail({

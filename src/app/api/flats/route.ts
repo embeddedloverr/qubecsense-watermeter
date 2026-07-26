@@ -3,21 +3,31 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Installation } from "@/lib/models/Installation";
 import { getSession } from "@/lib/auth";
+import { guardSite } from "@/lib/guard";
 
 export const runtime = "nodejs";
 
-/** Returns all flats annotated with whether they're already installed. */
+/** Returns the site's flats annotated with whether they're already installed.
+ *  Staff only — this carries owner names, emails and phone numbers, so a
+ *  resident must not be able to pull the whole owner directory. */
 export async function GET() {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "resident") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const g = await guardSite();
+  if (!g.ok) return g.res;
+  const siteId = g.ctx.siteId;
 
   await connectDB();
 
   const [flats, installs] = await Promise.all([
-    Flat.find().lean(),
-    Installation.find({}, { flatNumber: 1 }).lean(),
+    Flat.find({ siteId }).lean(),
+    Installation.find({ siteId }, { flatNumber: 1 }).lean(),
   ]);
 
   const installedSet = new Set(installs.map((i: any) => i.flatNumber));

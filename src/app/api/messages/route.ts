@@ -2,20 +2,21 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Message } from "@/lib/models/Message";
 import { Flat } from "@/lib/models/Flat";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // GET /api/messages — one row per flat that has a conversation (admin only).
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("messaging");
+  if (!g.ok) return g.res;
 
   await connectDB();
   const threads = await Message.aggregate([
+    // $match MUST be stage 1. Without it the $group below merges identically
+    // numbered flats from different sites into a single thread row.
+    { $match: { siteId: g.ctx.siteId } },
     { $sort: { createdAt: -1 } },
     {
       $group: {
@@ -37,7 +38,10 @@ export async function GET() {
     { $sort: { lastAt: -1 } },
   ]);
 
-  const flats = await Flat.find({}, { flatNumber: 1, ownerName: 1 }).lean();
+  const flats = await Flat.find(
+    { siteId: g.ctx.siteId },
+    { flatNumber: 1, ownerName: 1 }
+  ).lean();
   const nameByFlat = new Map(
     (flats as any[]).map((f) => [String(f.flatNumber), f.ownerName || ""])
   );

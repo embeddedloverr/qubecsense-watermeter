@@ -5,25 +5,34 @@ import { Flat } from "@/lib/models/Flat";
 import { Photo } from "@/lib/models/Photo";
 import { Schedule } from "@/lib/models/Schedule";
 import { getSession } from "@/lib/auth";
+import { guard, guardSite } from "@/lib/guard";
 import { compressImage, compressSignature } from "@/lib/image";
 import { floorOf } from "@/lib/utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** List installations. Admins see all; technicians see their own. */
+/** List installations. Admins see the site's; technicians see their own. */
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "resident") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Technicians see only their own, so they need no records capability.
+  const g =
+    session.role === "technician" ? await guardSite() : await guard("records");
+  if (!g.ok) return g.res;
 
   await connectDB();
 
   const { searchParams } = new URL(req.url);
   const mine = searchParams.get("mine") === "1";
 
-  const filter: Record<string, unknown> = {};
+  const filter: Record<string, unknown> = { siteId: g.ctx.siteId };
   if (session.role === "technician" || mine) {
     filter.technicianId = session.sub;
   }
@@ -42,6 +51,14 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "resident") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const g =
+    session.role === "technician" ? await guardSite() : await guard("records");
+  if (!g.ok) return g.res;
+  const siteId = g.ctx.siteId;
 
   try {
     const body = await req.json();
@@ -81,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     await connectDB();
 
-    const existing = await Installation.findOne({ flatNumber }).lean();
+    const existing = await Installation.findOne({ flatNumber, siteId }).lean();
     if (existing) {
       return NextResponse.json(
         { error: `Flat ${flatNumber} is already marked as installed.` },
@@ -89,7 +106,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const flat = await Flat.findOne({ flatNumber }).lean();
+    const flat = await Flat.findOne({ flatNumber, siteId }).lean();
     if (!flat) {
       return NextResponse.json(
         { error: `Flat ${flatNumber} not found.` },
@@ -105,13 +122,14 @@ export async function POST(req: NextRequest) {
     ]);
 
     const [kPhoto, bPhoto, sPhoto] = await Photo.create([
-      { kind: "kitchen", ...kImg },
-      { kind: "bathroom", ...bImg },
-      { kind: "signature", ...sImg },
+      { kind: "kitchen", siteId, ...kImg },
+      { kind: "bathroom", siteId, ...bImg },
+      { kind: "signature", siteId, ...sImg },
     ]);
 
     const f: any = flat;
     const installation = await Installation.create({
+      siteId,
       flatNumber,
       floor: f.floor ?? floorOf(flatNumber),
       ownerName: f.ownerName,
@@ -130,7 +148,7 @@ export async function POST(req: NextRequest) {
 
     // Close out any open schedule entry for this flat.
     await Schedule.updateMany(
-      { flatNumber, status: "planned" },
+      { flatNumber, siteId, status: "planned" },
       { $set: { status: "completed" } }
     );
 

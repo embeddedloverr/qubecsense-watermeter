@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models } from "mongoose";
+import { tenantScope } from "../tenantScope";
 
 export interface ISlab {
   /** Upper bound of cumulative consumption in litres; null = no limit (top slab). */
@@ -40,5 +41,7 @@ const TariffSchema = new Schema<ITariff>(
 
 // One tariff per key per site (leaves room for named tariffs later).
 TariffSchema.index({ siteId: 1, key: 1 }, { unique: true });
+
+TariffSchema.plugin(tenantScope, { name: "Tariff" });
 
 export const Tariff = models.Tariff || model<ITariff>("Tariff", TariffSchema);

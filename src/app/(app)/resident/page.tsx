@@ -3,7 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { User } from "@/lib/models/User";
-import { fetchLiveData, LiveDataError, type LiveFlat } from "@/lib/liveData";
+import {
+  fetchLiveData,
+  LiveDataError,
+  resolveSiteCreds,
+  type LiveFlat,
+} from "@/lib/liveData";
 import { applySlabs, type Slab } from "@/lib/billing";
 import { usageInPeriod, periodRange, type BudgetPeriod } from "@/lib/budget";
 import { Card, CardContent } from "@/components/ui";
@@ -21,10 +26,12 @@ export default async function ResidentHome() {
   const session = (await getSession())!;
   const flatNumber = session.flat || "";
 
+  const siteId = session.siteId;
+
   await connectDB();
   const [flatDoc, tariffDoc, userDoc] = await Promise.all([
-    flatNumber ? Flat.findOne({ flatNumber }).lean() : null,
-    Tariff.findOne({ key: "default" }).lean(),
+    flatNumber ? Flat.findOne({ flatNumber, siteId }).lean() : null,
+    Tariff.findOne({ key: "default", siteId }).lean(),
     User.findById(session.sub)
       .select("budgetEnabled budgetLitres budgetPeriod")
       .lean(),
@@ -37,7 +44,8 @@ export default async function ResidentHome() {
   let error: string | null = null;
 
   try {
-    const data = await fetchLiveData({ days: 32, flat: flatNumber });
+    const creds = siteId ? await resolveSiteCreds(siteId) : undefined;
+    const data = await fetchLiveData({ days: 32, flat: flatNumber }, creds);
     project = data.project;
     building = data.building;
     dates = data.range?.dates || [];

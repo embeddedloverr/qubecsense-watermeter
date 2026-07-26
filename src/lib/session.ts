@@ -10,6 +10,17 @@ export const SESSION_COOKIE = "qs_session";
  */
 export type Role = "superadmin" | "admin" | "technician" | "resident";
 
+/** What an admin may do within a site. Kept here so middleware can read it. */
+export type Capability =
+  | "view_data"
+  | "exports"
+  | "billing"
+  | "residents"
+  | "messaging"
+  | "records"
+  | "schedule"
+  | "technicians";
+
 export interface SessionPayload {
   sub: string;
   name: string;
@@ -21,6 +32,20 @@ export interface SessionPayload {
   flat?: string;
   /** True while the user still has a seeded password to replace. */
   mustChange?: boolean;
+
+  /** Active site. Undefined only for a superadmin who has not entered one. */
+  siteId?: string;
+  siteSlug?: string;
+  /** Cached for the header chip, so rendering needs no extra DB read. */
+  siteName?: string;
+  /**
+   * UI HINT ONLY — never an authorisation decision. Tokens live 7 days, so
+   * guard() re-reads capabilities from the database on every protected
+   * request; this copy exists so the nav can render without a round-trip.
+   */
+  caps?: Capability[];
+  /** True when a superadmin is acting inside a site. */
+  acting?: boolean;
 }
 
 function getSecret(): Uint8Array {
@@ -52,6 +77,13 @@ export async function verifySessionToken(
       username: payload.username ? String(payload.username) : undefined,
       flat: payload.flat ? String(payload.flat) : undefined,
       mustChange: payload.mustChange === true,
+      siteId: payload.siteId ? String(payload.siteId) : undefined,
+      siteSlug: payload.siteSlug ? String(payload.siteSlug) : undefined,
+      siteName: payload.siteName ? String(payload.siteName) : undefined,
+      caps: Array.isArray(payload.caps)
+        ? (payload.caps as Capability[])
+        : undefined,
+      acting: payload.acting === true,
     };
   } catch {
     return null;

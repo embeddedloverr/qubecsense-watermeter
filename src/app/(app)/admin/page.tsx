@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { connectDB } from "@/lib/db";
+import { guardPage } from "@/lib/guard";
 import { Flat } from "@/lib/models/Flat";
 import { Installation } from "@/lib/models/Installation";
 import { Schedule } from "@/lib/models/Schedule";
@@ -60,6 +61,10 @@ function StatCard({
 }
 
 export default async function AdminDashboard() {
+  // Overview counts only — any admin with a site may see them.
+  const ctx = await guardPage([]);
+  const siteId = ctx.siteId;
+
   await connectDB();
 
   const today = new Date();
@@ -67,13 +72,13 @@ export default async function AdminDashboard() {
   start14.setDate(start14.getDate() - 13);
 
   const [totalFlats, installs, plannedCount, recent] = await Promise.all([
-    Flat.countDocuments({}),
+    Flat.countDocuments({ siteId }),
     Installation.find(
-      {},
+      { siteId },
       { installationDate: 1, technicianName: 1, floor: 1, createdAt: 1 }
     ).lean(),
-    Schedule.countDocuments({ status: "planned" }),
-    Installation.find({})
+    Schedule.countDocuments({ siteId, status: "planned" }),
+    Installation.find({ siteId })
       .sort({ createdAt: -1 })
       .limit(8)
       .lean(),

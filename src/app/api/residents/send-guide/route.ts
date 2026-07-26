@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Flat } from "@/lib/models/Flat";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
 
 export const runtime = "nodejs";
@@ -80,10 +80,8 @@ function buildGuideEmail(ownerName: string, flat: string) {
 
 // POST /api/residents/send-guide  { ids: string[] }
 export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("residents");
+  if (!g.ok) return g.res;
   if (!isMailConfigured()) {
     return NextResponse.json(
       { error: "SMTP is not configured on the server." },
@@ -113,9 +111,13 @@ export async function POST(req: NextRequest) {
     const users = await User.find({
       _id: { $in: ids },
       role: "resident",
+      siteId: g.ctx.siteId,
     }).lean();
     const flats = await Flat.find(
-      { flatNumber: { $in: users.map((u: any) => u.flatNumber) } },
+      {
+        flatNumber: { $in: users.map((u: any) => u.flatNumber) },
+        siteId: g.ctx.siteId,
+      },
       { flatNumber: 1, ownerName: 1, ownerEmail: 1 }
     ).lean();
     const flatByNumber = new Map(

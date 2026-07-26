@@ -3,8 +3,9 @@ import { randomInt } from "node:crypto";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Flat } from "@/lib/models/Flat";
+import { Types } from "mongoose";
 import { hashPassword } from "@/lib/auth";
-import { requireAdmin } from "@/lib/guard";
+import { guard } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,11 +29,13 @@ function randomPassword(len = 10) {
   return chars.join("");
 }
 
-async function loadResident(id: string) {
+/** Load a resident, scoped to the caller's site so one site's admin cannot
+ *  reset or rewrite another site's resident by guessing an id. */
+async function loadResident(id: string, siteId: Types.ObjectId) {
   await connectDB();
-  const user = await User.findById(id);
-  if (!user || user.role !== "resident") return null;
-  return user;
+  if (!Types.ObjectId.isValid(id)) return null;
+  const user = await User.findOne({ _id: id, role: "resident", siteId });
+  return user || null;
 }
 
 // POST /api/residents/<id>  { action: "reset-password" }
@@ -42,9 +45,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!(await requireAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("residents");
+  if (!g.ok) return g.res;
 
   try {
     const { action } = await req.json();
@@ -52,7 +54,7 @@ export async function POST(
       return NextResponse.json({ error: "Unknown action." }, { status: 400 });
     }
 
-    const user = await loadResident(params.id);
+    const user = await loadResident(params.id, g.ctx.siteId);
     if (!user) {
       return NextResponse.json({ error: "Resident not found." }, { status: 404 });
     }
@@ -83,13 +85,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!(await requireAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("residents");
+  if (!g.ok) return g.res;
 
   try {
     const body = await req.json();
-    const user = await loadResident(params.id);
+    const user = await loadResident(params.id, g.ctx.siteId);
     if (!user) {
       return NextResponse.json({ error: "Resident not found." }, { status: 404 });
     }
@@ -104,7 +105,7 @@ export async function PATCH(
         );
       }
       await Flat.updateOne(
-        { flatNumber: user.flatNumber },
+        { flatNumber: user.flatNumber, siteId: g.ctx.siteId },
         { $set: { ownerEmail: email } }
       );
       return NextResponse.json({ id: String(user._id), email });

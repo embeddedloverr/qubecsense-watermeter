@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { findUserByIdentifier } from "@/lib/authLookup";
+import { findUserByIdentifier, sessionPayloadFor } from "@/lib/authLookup";
 import { createSessionToken, setSessionCookie } from "@/lib/auth";
 import { verifyOtp, OTP_MAX_ATTEMPTS } from "@/lib/otp";
 
@@ -59,15 +59,7 @@ export async function POST(req: NextRequest) {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const token = await createSessionToken({
-      sub: user._id.toString(),
-      name: user.name,
-      email: user.email || "",
-      role: user.role,
-      username: user.username || undefined,
-      flat: user.flatNumber || undefined,
-      mustChange: user.mustChangePassword === true,
-    });
+    const token = await createSessionToken(await sessionPayloadFor(user));
     setSessionCookie(token);
 
     return NextResponse.json({

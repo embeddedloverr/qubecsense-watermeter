@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models } from "mongoose";
+import { tenantScope } from "../tenantScope";
 
 export interface IPhoto {
   _id: mongoose.Types.ObjectId;
@@ -29,5 +30,7 @@ const PhotoSchema = new Schema<IPhoto>(
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+PhotoSchema.plugin(tenantScope, { name: "Photo" });
 
 export const Photo = models.Photo || model<IPhoto>("Photo", PhotoSchema);

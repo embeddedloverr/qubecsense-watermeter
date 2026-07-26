@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { connectDB } from "@/lib/db";
+import { Site } from "@/lib/models/Site";
 import { runBudgetAlerts } from "@/lib/budgetAlerts";
 
 export const runtime = "nodejs";
@@ -26,7 +28,19 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const result = await runBudgetAlerts();
+    // Optionally restrict to one site: ?site=<slug>
+    const slug = req.nextUrl.searchParams.get("site");
+    let onlySiteId: string | undefined;
+    if (slug) {
+      await connectDB();
+      const site = await Site.findOne({ slug }).select("_id").lean<{ _id: any }>();
+      if (!site) {
+        return NextResponse.json({ error: "Unknown site." }, { status: 404 });
+      }
+      onlySiteId = String(site._id);
+    }
+
+    const result = await runBudgetAlerts(new Date(), onlySiteId);
     return NextResponse.json({ ok: true, ...result });
   } catch (err: any) {
     console.error("budget-alerts cron error", err);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
+import { sessionPayloadFor } from "@/lib/authLookup";
 import {
   createSessionToken,
   setSessionCookie,
@@ -50,15 +51,7 @@ export async function POST(req: NextRequest) {
       .exec()
       .catch((e) => console.error("lastLoginAt update failed", e));
 
-    const token = await createSessionToken({
-      sub: user._id.toString(),
-      name: user.name,
-      email: user.email || "",
-      role: user.role,
-      username: user.username || undefined,
-      flat: user.flatNumber || undefined,
-      mustChange: user.mustChangePassword === true,
-    });
+    const token = await createSessionToken(await sessionPayloadFor(user));
     setSessionCookie(token);
 
     return NextResponse.json({

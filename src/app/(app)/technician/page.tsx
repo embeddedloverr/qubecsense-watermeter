@@ -18,17 +18,20 @@ export default async function TechnicianHome() {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
+  const siteId = session.siteId;
+
   const [completedCount, todayCount, recent, planned] = await Promise.all([
-    Installation.countDocuments({ technicianId: session.sub }),
+    Installation.countDocuments({ technicianId: session.sub, siteId }),
     Installation.countDocuments({
       technicianId: session.sub,
+      siteId,
       createdAt: { $gte: today, $lt: tomorrow },
     }),
-    Installation.find({ technicianId: session.sub })
+    Installation.find({ technicianId: session.sub, siteId })
       .sort({ createdAt: -1 })
       .limit(100)
       .lean(),
-    Schedule.find({ technicianId: session.sub, status: "planned" })
+    Schedule.find({ technicianId: session.sub, siteId, status: "planned" })
       .sort({ scheduledDate: 1 })
       .limit(8)
       .lean(),

@@ -2,24 +2,23 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Flat } from "@/lib/models/Flat";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // GET /api/residents — all flat-wise resident accounts (admin only).
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("residents");
+  if (!g.ok) return g.res;
+  const siteId = g.ctx.siteId;
 
   await connectDB();
   const [residents, flats] = await Promise.all([
-    User.find({ role: "resident" })
+    User.find({ role: "resident", siteId })
       .select("name username flatNumber phone active mustChangePassword lastLoginAt")
       .lean(),
-    Flat.find({}, { flatNumber: 1, ownerEmail: 1 }).lean(),
+    Flat.find({ siteId }, { flatNumber: 1, ownerEmail: 1 }).lean(),
   ]);
 
   // The login email lives on the flat (ownerEmail) — that's where OTP codes go.

@@ -3,25 +3,25 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Installation } from "@/lib/models/Installation";
 import { Schedule } from "@/lib/models/Schedule";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Overview counts only — any admin with a site may read them.
+  const g = await guard([]);
+  if (!g.ok) return g.res;
+  const siteId = g.ctx.siteId;
 
   await connectDB();
 
   const [totalFlats, installedCount, plannedCount, installs] =
     await Promise.all([
-      Flat.countDocuments({}),
-      Installation.countDocuments({}),
-      Schedule.countDocuments({ status: "planned" }),
+      Flat.countDocuments({ siteId }),
+      Installation.countDocuments({ siteId }),
+      Schedule.countDocuments({ siteId, status: "planned" }),
       Installation.find(
-        {},
+        { siteId },
         { installationDate: 1, technicianName: 1, floor: 1, createdAt: 1 }
       ).lean(),
     ]);

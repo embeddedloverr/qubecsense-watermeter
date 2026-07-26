@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Tariff } from "@/lib/models/Tariff";
-import { requireAdmin } from "@/lib/guard";
+import { guard } from "@/lib/guard";
 import { validateSlabs, type Slab } from "@/lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("billing");
+  if (!g.ok) return g.res;
 
   await connectDB();
-  const tariff = await Tariff.findOne({ key: "default" }).lean();
+  const tariff = await Tariff.findOne({
+    key: "default",
+    siteId: g.ctx.siteId,
+  }).lean();
   return NextResponse.json({
     tariff: tariff
       ? { slabs: (tariff as any).slabs, fixedCharge: (tariff as any).fixedCharge }
@@ -24,10 +25,8 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("billing");
+  if (!g.ok) return g.res;
 
   try {
     const body = await req.json();
@@ -50,9 +49,11 @@ export async function PUT(req: NextRequest) {
     }
 
     await connectDB();
+    // siteId must be in BOTH the filter and the upserted document, or an
+    // upsert would create a second site-less tariff row.
     await Tariff.findOneAndUpdate(
-      { key: "default" },
-      { slabs, fixedCharge },
+      { key: "default", siteId: g.ctx.siteId },
+      { slabs, fixedCharge, siteId: g.ctx.siteId, key: "default" },
       { upsert: true, new: true }
     );
     return NextResponse.json({ tariff: { slabs, fixedCharge } });

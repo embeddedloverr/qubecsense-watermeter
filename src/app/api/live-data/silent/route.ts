@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
-import { fetchLiveData, LiveDataError, type LiveMeter } from "@/lib/liveData";
+import {
+  fetchLiveData,
+  LiveDataError,
+  resolveSiteCreds,
+  type LiveMeter,
+} from "@/lib/liveData";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,10 +18,8 @@ export const dynamic = "force-dynamic";
 // Catches flat batteries and connectivity failures, which are otherwise
 // invisible because the data API only returns meters that reported.
 export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("view_data");
+  if (!g.ok) return g.res;
 
   const windowDays = Math.min(
     Math.max(Number(req.nextUrl.searchParams.get("window")) || 30, 2),
@@ -24,7 +27,8 @@ export async function GET(req: NextRequest) {
   );
 
   try {
-    const data = await fetchLiveData({ days: windowDays });
+    const creds = await resolveSiteCreds(g.ctx.siteId);
+    const data = await fetchLiveData({ days: windowDays }, creds);
     const latest = data.range?.to || null;
     if (!latest) {
       return NextResponse.json({ latestDate: null, windowDays, silent: [] });
@@ -73,7 +77,10 @@ export async function GET(req: NextRequest) {
     // Attach owner names so the admin knows who to contact.
     try {
       await connectDB();
-      const flats = await Flat.find({}, { flatNumber: 1, ownerName: 1, ownerPhone: 1 }).lean();
+      const flats = await Flat.find(
+        { siteId: g.ctx.siteId },
+        { flatNumber: 1, ownerName: 1, ownerPhone: 1 }
+      ).lean();
       const byNumber = new Map(
         (flats as any[]).map((f) => [String(f.flatNumber), f])
       );

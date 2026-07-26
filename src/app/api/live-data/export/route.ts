@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
-import { fetchLiveData, LiveDataError } from "@/lib/liveData";
+import { fetchLiveData, LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +15,8 @@ const MAX_DAYS = 92; // upstream retention
 // used by the CSV (detailed) and PDF (summary) exports. Intraday buckets are
 // stripped to keep the payload small.
 export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("exports");
+  if (!g.ok) return g.res;
 
   const from = req.nextUrl.searchParams.get("from") || "";
   const to = req.nextUrl.searchParams.get("to") || "";
@@ -60,13 +58,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const data = await fetchLiveData({
-      days: Math.min(Math.max(daysBack, 1), MAX_DAYS),
-    });
+    const creds = await resolveSiteCreds(g.ctx.siteId);
+    const data = await fetchLiveData(
+      { days: Math.min(Math.max(daysBack, 1), MAX_DAYS) },
+      creds
+    );
 
     await connectDB();
     const flatDocs = await Flat.find(
-      {},
+      { siteId: g.ctx.siteId },
       { flatNumber: 1, ownerName: 1, ownerPhone: 1 }
     ).lean();
     const ownerByFlat = new Map(

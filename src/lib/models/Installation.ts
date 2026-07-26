@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models } from "mongoose";
+import { tenantScope } from "../tenantScope";
 
 export interface IMeter {
   meterSerial: string;
@@ -63,6 +64,8 @@ const InstallationSchema = new Schema<IInstallation>(
 // allowed. (The old global {flatNumber} unique index never existed — see the
 // note above — so this compound index is what finally enforces the rule.)
 InstallationSchema.index({ siteId: 1, flatNumber: 1 }, { unique: true });
+
+InstallationSchema.plugin(tenantScope, { name: "Installation" });
 
 export const Installation =
   models.Installation ||

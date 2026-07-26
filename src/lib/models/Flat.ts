@@ -1,4 +1,5 @@
 import mongoose, { Schema, model, models } from "mongoose";
+import { tenantScope } from "../tenantScope";
 
 export interface IFlat {
   _id: mongoose.Types.ObjectId;
@@ -32,5 +33,7 @@ const FlatSchema = new Schema<IFlat>(
 
 // A flat number is unique within its site.
 FlatSchema.index({ siteId: 1, flatNumber: 1 }, { unique: true });
+
+FlatSchema.plugin(tenantScope, { name: "Flat" });
 
 export const Flat = models.Flat || model<IFlat>("Flat", FlatSchema);

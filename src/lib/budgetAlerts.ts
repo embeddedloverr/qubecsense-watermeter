@@ -1,7 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Flat } from "@/lib/models/Flat";
-import { fetchLiveData } from "@/lib/liveData";
+import { fetchLiveData, resolveSiteCreds } from "@/lib/liveData";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
 import {
   periodKey,
@@ -93,7 +93,10 @@ export interface BudgetAlertResult {
  * Check every resident with an active budget and email those who have gone
  * over their limit this period and haven't been alerted for it yet.
  */
-export async function runBudgetAlerts(now: Date = new Date()): Promise<BudgetAlertResult> {
+export async function runBudgetAlerts(
+  now: Date = new Date(),
+  onlySiteId?: string
+): Promise<BudgetAlertResult> {
   const result: BudgetAlertResult = {
     checked: 0,
     overBudget: 0,
@@ -112,29 +115,56 @@ export async function runBudgetAlerts(now: Date = new Date()): Promise<BudgetAle
     active: { $ne: false },
     budgetEnabled: true,
     budgetLitres: { $gt: 0 },
+    ...(onlySiteId ? { siteId: onlySiteId } : {}),
   });
   if (!residents.length) return result;
 
-  // One dataset covers everyone; 32 days spans the current week and month.
-  const data = await fetchLiveData({ days: 32 });
+  // Each site has its own upstream credentials, so fetch per site rather than
+  // once for everyone, and key readings by (site, flat) since flat numbers
+  // repeat across sites.
+  const siteIds = [
+    ...new Set(residents.map((r) => String(r.siteId || "")).filter(Boolean)),
+  ];
+  const flatKey = (siteId: string, flat: string) => `${siteId}::${flat}`;
   const readingsByFlat = new Map<string, { date: string; litres: number }[]>();
-  for (const f of data.flats) {
-    const rs: { date: string; litres: number }[] = [];
-    for (const m of f.meters) {
-      for (const r of m.readings) rs.push({ date: r.date, litres: r.consumptionLitres });
+
+  for (const siteId of siteIds) {
+    try {
+      const creds = await resolveSiteCreds(siteId);
+      // 32 days spans the current week and month.
+      const data = await fetchLiveData({ days: 32 }, creds);
+      for (const f of data.flats) {
+        const rs: { date: string; litres: number }[] = [];
+        for (const m of f.meters) {
+          for (const r of m.readings)
+            rs.push({ date: r.date, litres: r.consumptionLitres });
+        }
+        readingsByFlat.set(flatKey(siteId, String(f.flat)), rs);
+      }
+    } catch (err) {
+      // One site's upstream being down must not abort the whole run.
+      console.error(`budget alerts: site ${siteId} data fetch failed`, err);
     }
-    readingsByFlat.set(String(f.flat), rs);
   }
 
-  const flats = await Flat.find({}, { flatNumber: 1, ownerName: 1, ownerEmail: 1 }).lean();
-  const flatByNumber = new Map((flats as any[]).map((f) => [String(f.flatNumber), f]));
+  const flats = await Flat.find(
+    onlySiteId ? { siteId: onlySiteId } : {},
+    { flatNumber: 1, ownerName: 1, ownerEmail: 1, siteId: 1 }
+  ).lean();
+  const flatByNumber = new Map(
+    (flats as any[]).map((f) => [
+      flatKey(String(f.siteId || ""), String(f.flatNumber)),
+      f,
+    ])
+  );
 
   for (const user of residents) {
     result.checked++;
     const flat = String(user.flatNumber || "");
+    const siteId = String(user.siteId || "");
     const period = (user.budgetPeriod as BudgetPeriod) || "monthly";
     const limit = user.budgetLitres || 0;
-    const readings = readingsByFlat.get(flat);
+    const readings = readingsByFlat.get(flatKey(siteId, flat));
 
     if (!readings || readings.length === 0) {
       result.noData++;
@@ -156,7 +186,7 @@ export async function runBudgetAlerts(now: Date = new Date()): Promise<BudgetAle
       continue;
     }
 
-    const flatDoc = flatByNumber.get(flat);
+    const flatDoc = flatByNumber.get(flatKey(siteId, flat));
     const email = (flatDoc?.ownerEmail || user.email || "").trim();
     if (!email) {
       result.details.push({ flat, used, limit, status: "no-email" });

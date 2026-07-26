@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
-import { getSession } from "@/lib/auth";
+import { guard } from "@/lib/guard";
 import { applySlabs, type Slab } from "@/lib/billing";
-import { fetchLiveData, LiveDataError, envCreds } from "@/lib/liveData";
+import { fetchLiveData, LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,20 +14,8 @@ export const dynamic = "force-dynamic";
 // owner details from the flats collection, and prices it with the saved
 // slab tariff.
 export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (!envCreds()) {
-    return NextResponse.json(
-      {
-        error:
-          "Live data API is not configured. Set DATA_API_URL and DATA_API_KEY in .env.",
-      },
-      { status: 503 }
-    );
-  }
+  const g = await guard("billing");
+  if (!g.ok) return g.res;
 
   const month = req.nextUrl.searchParams.get("month") || "";
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
@@ -57,14 +45,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const data: any = await fetchLiveData({
-      days: Math.min(Math.max(daysBack, 1), 92),
-    });
+    const creds = await resolveSiteCreds(g.ctx.siteId);
+    const data: any = await fetchLiveData(
+      { days: Math.min(Math.max(daysBack, 1), 92) },
+      creds
+    );
 
     await connectDB();
     const [tariffDoc, flats] = await Promise.all([
-      Tariff.findOne({ key: "default" }).lean(),
-      Flat.find({}, { flatNumber: 1, ownerName: 1, ownerPhone: 1, ownerEmail: 1 }).lean(),
+      Tariff.findOne({ key: "default", siteId: g.ctx.siteId }).lean(),
+      Flat.find(
+        { siteId: g.ctx.siteId },
+        { flatNumber: 1, ownerName: 1, ownerPhone: 1, ownerEmail: 1 }
+      ).lean(),
     ]);
     const slabs: Slab[] = (tariffDoc as any)?.slabs || [];
     const fixedCharge: number = (tariffDoc as any)?.fixedCharge || 0;

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Message } from "@/lib/models/Message";
 import { Flat } from "@/lib/models/Flat";
-import { requireAdmin } from "@/lib/guard";
+import { guard } from "@/lib/guard";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
 
 export const runtime = "nodejs";
@@ -24,19 +24,19 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { flat: string } }
 ) {
-  if (!(await requireAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("messaging");
+  if (!g.ok) return g.res;
   const flat = params.flat;
+  const siteId = g.ctx.siteId;
 
   await connectDB();
   const [messages, flatDoc] = await Promise.all([
-    Message.find({ flatNumber: flat }).sort({ createdAt: 1 }).lean(),
-    Flat.findOne({ flatNumber: flat }, { ownerName: 1, ownerPhone: 1 }).lean(),
+    Message.find({ flatNumber: flat, siteId }).sort({ createdAt: 1 }).lean(),
+    Flat.findOne({ flatNumber: flat, siteId }, { ownerName: 1, ownerPhone: 1 }).lean(),
   ]);
 
   await Message.updateMany(
-    { flatNumber: flat, sender: "resident", readByAdmin: false },
+    { flatNumber: flat, siteId, sender: "resident", readByAdmin: false },
     { $set: { readByAdmin: true } }
   );
 
@@ -53,11 +53,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { flat: string } }
 ) {
-  const session = await requireAdmin();
-  if (!session) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("messaging");
+  if (!g.ok) return g.res;
+  const session = g.ctx.session;
   const flat = params.flat;
+  const siteId = g.ctx.siteId;
 
   try {
     const { body } = await req.json();
@@ -71,6 +71,7 @@ export async function POST(
 
     await connectDB();
     const msg = await Message.create({
+      siteId,
       flatNumber: flat,
       sender: "admin",
       senderName: session.name || "Admin",
@@ -80,7 +81,7 @@ export async function POST(
     });
 
     // Notify the resident by email (best-effort).
-    const flatDoc = await Flat.findOne({ flatNumber: flat }, { ownerEmail: 1, ownerName: 1 }).lean();
+    const flatDoc = await Flat.findOne({ flatNumber: flat, siteId }, { ownerEmail: 1, ownerName: 1 }).lean();
     const to = (flatDoc as any)?.ownerEmail;
     if (isMailConfigured() && to) {
       const appUrl = (process.env.APP_URL || "https://meters.qubecsense.com").replace(/\/$/, "");

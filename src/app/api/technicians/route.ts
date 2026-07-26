@@ -2,19 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { hashPassword } from "@/lib/auth";
-import { requireAdmin } from "@/lib/guard";
+import { guard } from "@/lib/guard";
 import { validatePassword } from "@/lib/password";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("technicians");
+  if (!g.ok) return g.res;
 
   await connectDB();
-  const techs = await User.find({ role: "technician" })
+  const techs = await User.find({ role: "technician", siteId: g.ctx.siteId })
     .select("name email phone active createdAt")
     .sort({ createdAt: -1 })
     .lean();
@@ -23,10 +21,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await requireAdmin();
-  if (!admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const g = await guard("technicians");
+  if (!g.ok) return g.res;
 
   try {
     const { name, email, password, phone } = await req.json();
@@ -53,6 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     const user = await User.create({
+      siteId: g.ctx.siteId,
       name,
       email: String(email).toLowerCase().trim(),
       phone: phone || "",

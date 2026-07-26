@@ -50,3 +50,6 @@ export async function connectDB(): Promise<typeof mongoose> {
 
   return cached.conn;
 }
+
+// The unscoped-query guard lives in lib/tenantScope.ts and is applied by each
+// tenant model, because Mongoose ignores hooks added after a model compiles.
