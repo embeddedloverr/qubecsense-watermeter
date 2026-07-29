@@ -18,10 +18,11 @@ export interface IFlat {
 const FlatSchema = new Schema<IFlat>(
   {
     siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
-    // `unique` here is the LEGACY global constraint. It coexists with the
-    // compound index below while there is only one site, and is dropped by
-    // `migrate-multisite.mjs --phase=drop-legacy` before site #2 is created.
-    flatNumber: { type: String, required: true, unique: true },
+    // NOT globally unique — flat "101" exists in every building. Uniqueness is
+    // per site, via the compound index below. (Leaving `unique: true` here
+    // would let autoIndex silently recreate the legacy global index that
+    // --phase=drop-legacy just removed.)
+    flatNumber: { type: String, required: true },
     floor: { type: Number, default: 0 },
     ownerName: { type: String, default: "" },
     ownerEmail: { type: String, default: "" },

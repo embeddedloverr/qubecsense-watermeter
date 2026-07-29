@@ -30,9 +30,9 @@ const SlabSchema = new Schema<ISlab>(
 const TariffSchema = new Schema<ITariff>(
   {
     siteId: { type: Schema.Types.ObjectId, ref: "Site", index: true },
-    // LEGACY global unique — coexists with the compound index below while
-    // there is one site; dropped by `--phase=drop-legacy` before site #2.
-    key: { type: String, required: true, unique: true, default: "default" },
+    // NOT globally unique — each site has its own "default" tariff.
+    // Uniqueness is per site, via the compound index below.
+    key: { type: String, required: true, default: "default" },
     slabs: { type: [SlabSchema], default: [] },
     fixedCharge: { type: Number, default: 0, min: 0 },
   },

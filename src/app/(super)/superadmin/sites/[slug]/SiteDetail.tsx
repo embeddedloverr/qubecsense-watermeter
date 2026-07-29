@@ -184,10 +184,10 @@ export function SiteDetail({
 
       {/* Per-site management, mounted from the admin components */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <NavCard href={`/superadmin/sites/${slug}/flats`} title="Flats" desc="Import & residents" />
         <NavCard href={`/superadmin/sites/${slug}/records`} title="Records" desc="Installations" />
         <NavCard href={`/superadmin/sites/${slug}/technicians`} title="Technicians" desc="Field team" />
-        <NavCard href={`/superadmin/sites/${slug}/admins`} title="Admins" desc="Access & rights" />
-        <NavCard href={`/superadmin/admins`} title="All admins" desc="Across sites" />
+        <NavCard href={`/superadmin/admins`} title="Admins" desc="Access & rights" />
       </div>
 
       <Card>

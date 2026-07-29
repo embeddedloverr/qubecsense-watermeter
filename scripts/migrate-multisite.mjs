@@ -292,6 +292,10 @@ async function phaseDropLegacy(db) {
     }
   }
 
+  // NOTE: the models must no longer declare `unique: true` on these fields, or
+  // Mongoose's autoIndex will simply recreate them on the next connect and the
+  // second site's flat 101 will fail to insert. (That is exactly what happened
+  // the first time this ran.)
   const toDrop = [
     ["flats", "flatNumber_1"],
     ["tariffs", "key_1"],

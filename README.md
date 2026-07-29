@@ -258,6 +258,23 @@ npm run migrate:multisite -- --phase=drop-legacy --apply --confirm=rosalyn-21
 
 That step refuses to run unless the replacement compound indexes already exist.
 
+### Onboarding a second site
+
+1. **Superadmin → Sites → New site.** Give it a name and a **unique username
+   prefix** (this is what keeps `rosalyn_101` and `greenwood_101` distinct, and
+   it cannot be changed later). Add its own `dataApiUrl`/`dataApiKey` and use
+   **Test connection**.
+2. **Site → Flats.** Paste a CSV (`Flat, Owner, Email, Phone`), **Preview**,
+   then **Import**. This creates the flats and their resident logins in one
+   step — the server-side equivalent of `npm run seed`, scoped to that site.
+   Re-importing updates rather than duplicating.
+3. **Superadmin → Admins.** Create the site's admin and tick their capabilities.
+
+> Each site needs its **own** meter-data credentials. The shared `DATA_API_*`
+> env fallback applies **only while a single site exists**; with two or more,
+> a site without its own key reports "unconfigured" rather than silently
+> showing another site's meters.
+
 ## 👑 Superadmin
 
 The superadmin sits above sites: they create and monitor buildings and control

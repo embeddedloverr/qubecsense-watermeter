@@ -55,9 +55,13 @@ export function envCreds(): LiveDataCreds | null {
 }
 
 /**
- * Credentials for a site, falling back to env when the site has none stored.
- * The fallback is what lets the original site keep working before its keys are
- * entered in the superadmin UI; it goes away once every site has its own.
+ * Credentials for a site.
+ *
+ * Falls back to the env credentials ONLY while a single site exists — that is
+ * what let the original site keep working before its key was entered in the
+ * superadmin UI. With two or more sites the fallback is refused: borrowing
+ * another site's key would silently show its meters and bill residents for
+ * someone else's water, with no error to notice.
  */
 export async function resolveSiteCreds(
   siteId: string | { toString(): string }
@@ -79,12 +83,22 @@ export async function resolveSiteCreds(
     };
   }
 
+  const named = site?.name || String(siteId);
   const fallback = envCreds();
   if (!fallback) {
     throw new LiveDataError(
-      `No meter-data credentials for site ${site?.name || siteId}. Add them in the site settings.`
+      `No meter-data credentials for ${named}. Add them in the site's settings.`
     );
   }
+
+  const siteCount = await Site.estimatedDocumentCount();
+  if (siteCount > 1) {
+    throw new LiveDataError(
+      `${named} has no meter-data credentials of its own. Add them in the site's settings — ` +
+        `the shared fallback is only used when there is a single site, so it is not applied here.`
+    );
+  }
+
   return fallback;
 }
 
