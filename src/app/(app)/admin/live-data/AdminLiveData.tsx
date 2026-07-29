@@ -31,6 +31,7 @@ import {
   IconDroplet,
   IconHome,
   IconAlert,
+  IconCheckCircle,
 } from "@/components/icons";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { ExportDialog } from "./ExportDialog";
@@ -193,6 +194,8 @@ function FlagBadge({ flag }: { flag: string }) {
 
 const PRIMARY = "hsl(201 96% 38%)";
 const SECONDARY = "hsl(187 72% 40%)";
+/** Neutral grey that stays legible on both themes — used for "no data". */
+const MISSING = "hsl(215 20% 65%)";
 
 function ChartTooltip({ active, payload, label, unit }: any) {
   if (!active || !payload?.length) return null;
@@ -234,6 +237,60 @@ function DailyChart({ data }: { data: { date: string; total: number }[] }) {
         />
         <Tooltip content={<ChartTooltip unit="L" />} cursor={{ fill: "hsl(var(--muted))" }} />
         <Bar dataKey="total" name="Consumption" fill={PRIMARY} radius={[4, 4, 0, 0]} maxBarSize={28} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** How many meters a day's readings cover.
+ *
+ *  Stacked against the shortfall rather than plotted alone: in steady state the
+ *  count sits within a handful of 363, so a plain bar from zero would render
+ *  every day as an identical full-height bar and hide exactly the dip worth
+ *  seeing. Stacking pins every bar to the same total, so the grey cap IS the
+ *  number of meters missing that day. */
+function ReportingChart({
+  data,
+  totalMeters,
+}: {
+  data: { date: string; count: number }[];
+  totalMeters: number;
+}) {
+  const fmt = data.map((d) => ({
+    label: new Date(d.date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+    }),
+    Reported: d.count,
+    "Not reporting": Math.max(0, totalMeters - d.count),
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={fmt} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+          tickLine={false}
+          axisLine={false}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+          tickLine={false}
+          axisLine={false}
+          allowDecimals={false}
+        />
+        <Tooltip content={<ChartTooltip unit="meters" />} cursor={{ fill: "hsl(var(--muted))" }} />
+        <Legend wrapperStyle={{ fontSize: 11 }} iconSize={10} />
+        <Bar dataKey="Reported" stackId="m" fill={SECONDARY} maxBarSize={28} />
+        <Bar
+          dataKey="Not reporting"
+          stackId="m"
+          fill={MISSING}
+          radius={[4, 4, 0, 0]}
+          maxBarSize={28}
+        />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -668,6 +725,23 @@ export function AdminLiveData() {
       .map(([date, total]) => ({ date, total }));
   }, [data]);
 
+  /** Meters that actually sent a reading on each day. The upstream only emits a
+   *  reading when a packet arrived, so "has a reading dated D" is the same as
+   *  "reported on D" — a day short of the total means meters went silent. */
+  const reportingByDate = React.useMemo(() => {
+    if (!data?.range) return [];
+    const map = new Map<string, number>(data.range.dates.map((d) => [d, 0]));
+    for (const m of [...data.flats.flatMap((f) => f.meters), ...data.unassigned]) {
+      // A meter can only be counted once per day, however many packets it sent.
+      for (const d of new Set(m.readings.map((r) => r.date))) {
+        map.set(d, (map.get(d) || 0) + 1);
+      }
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({ date, count }));
+  }, [data]);
+
   const kpis = React.useMemo(() => {
     if (!data) return null;
     const allMeters = [
@@ -685,8 +759,35 @@ export function AdminLiveData() {
     const latestLitres = latestDate
       ? totalsByDate.find((t) => t.date === latestDate)?.total || 0
       : 0;
-    return { totalLitres, alertMeters, latestDate, latestLitres };
-  }, [data, totalsByDate]);
+
+    // "Reported today" is about the meter checking in, not about the reading's
+    // own date: a meter sends yesterday's totals, so on any normal day zero
+    // readings are DATED today while hundreds have ARRIVED today. Counting by
+    // date would show 0/363 every morning and look like a total outage.
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const reportedToday = allMeters.filter((m) => {
+      const last = m.readings.reduce((max, r) => {
+        const ts = r.receivedAt ? Date.parse(r.receivedAt) : NaN;
+        return Number.isFinite(ts) && ts > max ? ts : max;
+      }, 0);
+      return last >= midnight.getTime();
+    }).length;
+
+    // Coverage of the newest data day — how many meters that day's totals cover.
+    const reportedLatest = latestDate
+      ? reportingByDate.find((r) => r.date === latestDate)?.count || 0
+      : 0;
+
+    return {
+      totalLitres,
+      alertMeters,
+      latestDate,
+      latestLitres,
+      reportedToday,
+      reportedLatest,
+    };
+  }, [data, totalsByDate, reportingByDate]);
 
   const exportCsv = () => {
     if (!data) return;
@@ -878,13 +979,32 @@ export function AdminLiveData() {
 
       {/* KPIs */}
       {kpis && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <StatCard
             label="Flats reporting"
             value={data.flatCount}
             sub={`${data.meterCount} meters`}
             icon={IconHome}
             tone="primary"
+          />
+          <StatCard
+            label="Reported today"
+            value={`${kpis.reportedToday} / ${data.meterCount}`}
+            sub={
+              kpis.reportedToday === 0
+                ? "No meter has checked in today"
+                : kpis.reportedToday >= data.meterCount
+                  ? "Every meter checked in today"
+                  : `${data.meterCount - kpis.reportedToday} not heard from today`
+            }
+            icon={IconCheckCircle}
+            tone={
+              kpis.reportedToday === 0
+                ? "neutral"
+                : kpis.reportedToday >= data.meterCount
+                  ? "success"
+                  : "warning"
+            }
           />
           <StatCard
             label={`Consumption · ${days}d`}
@@ -896,7 +1016,11 @@ export function AdminLiveData() {
           <StatCard
             label="Latest day"
             value={litres(kpis.latestLitres)}
-            sub={kpis.latestDate ? formatDate(kpis.latestDate) : "—"}
+            sub={
+              kpis.latestDate
+                ? `${formatDate(kpis.latestDate)} · ${kpis.reportedLatest} meters`
+                : "—"
+            }
             icon={IconGauge}
             tone="neutral"
           />
@@ -917,6 +1041,22 @@ export function AdminLiveData() {
         </CardHeader>
         <CardContent>
           <DailyChart data={totalsByDate} />
+        </CardContent>
+      </Card>
+
+      {/* Meters reporting per day */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Meters reporting · day-wise</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            How many of the {data.meterCount} meters a day&apos;s totals cover.
+            Meters send the previous day&apos;s reading, so the newest full day
+            is {formatDate(data.range.to)} — today&apos;s bar appears once
+            tonight&apos;s packets arrive.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ReportingChart data={reportingByDate} totalMeters={data.meterCount} />
         </CardContent>
       </Card>
 
