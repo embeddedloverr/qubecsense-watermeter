@@ -24,6 +24,8 @@ export async function GET() {
         lastBody: { $first: "$body" },
         lastSender: { $first: "$sender" },
         lastAt: { $first: "$createdAt" },
+        // So a photo-only message shows as "Photo" rather than a blank row.
+        lastAttachment: { $first: "$attachmentId" },
         unread: {
           $sum: {
             $cond: [
@@ -49,7 +51,8 @@ export async function GET() {
   const rows = threads.map((t: any) => ({
     flat: t._id,
     ownerName: nameByFlat.get(String(t._id)) || "",
-    lastBody: t.lastBody,
+    lastBody: t.lastBody || "",
+    lastHasImage: Boolean(t.lastAttachment),
     lastSender: t.lastSender,
     lastAt: new Date(t.lastAt).toISOString(),
     unread: t.unread,

@@ -4,6 +4,12 @@ import { Message } from "@/lib/models/Message";
 import { Flat } from "@/lib/models/Flat";
 import { guard } from "@/lib/guard";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
+import {
+  storeAttachment,
+  linkAttachment,
+  attachmentPayload,
+  AttachmentError,
+} from "@/lib/messageAttachment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +19,9 @@ function serialise(m: any) {
     id: String(m._id),
     sender: m.sender,
     senderName: m.senderName || "",
-    body: m.body,
+    body: m.body || "",
     category: m.category || null,
+    attachment: attachmentPayload(m),
     createdAt: new Date(m.createdAt).toISOString(),
   };
 }
@@ -60,16 +67,35 @@ export async function POST(
   const siteId = g.ctx.siteId;
 
   try {
-    const { body } = await req.json();
+    const { body, image } = await req.json();
     const text = String(body || "").trim();
-    if (!text) {
-      return NextResponse.json({ error: "Type a reply." }, { status: 400 });
+    const hasImage = typeof image === "string" && image !== "";
+    if (!text && !hasImage) {
+      return NextResponse.json(
+        { error: "Type a reply or attach a photo." },
+        { status: 400 }
+      );
     }
     if (text.length > 2000) {
       return NextResponse.json({ error: "Message is too long." }, { status: 400 });
     }
 
     await connectDB();
+
+    let attachment = null;
+    try {
+      attachment = await storeAttachment({
+        dataUrl: image,
+        siteId,
+        flatNumber: flat,
+      });
+    } catch (e) {
+      if (e instanceof AttachmentError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+
     const msg = await Message.create({
       siteId,
       flatNumber: flat,
@@ -78,17 +104,22 @@ export async function POST(
       body: text,
       readByAdmin: true,
       readByResident: false,
+      ...(attachment || {}),
     });
+    if (attachment) await linkAttachment(attachment.attachmentId, msg._id);
 
     // Notify the resident by email (best-effort).
     const flatDoc = await Flat.findOne({ flatNumber: flat, siteId }, { ownerEmail: 1, ownerName: 1 }).lean();
     const to = (flatDoc as any)?.ownerEmail;
     if (isMailConfigured() && to) {
       const appUrl = (process.env.APP_URL || "https://meters.qubecsense.com").replace(/\/$/, "");
+      const photoNote = attachment
+        ? "\n\n📷 A photo is attached — sign in to view it."
+        : "";
       sendMail({
         to,
         subject: `Reply from QubecSense — Flat ${flat}`,
-        text: `The QubecSense team replied to your message:\n\n${text}\n\nSign in to reply: ${appUrl}/login`,
+        text: `The QubecSense team replied to your message:\n\n${text || "(no text)"}${photoNote}\n\nSign in to reply: ${appUrl}/login`,
       }).catch((e) => console.error("resident notify failed", e));
     }
 

@@ -204,6 +204,24 @@ ones, and the script **aborts** if any real detail is still visible, so the
 guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 `guide-preview.png` of the whole document.
 
+## 💬 Resident ↔ admin chat
+
+Each flat has one conversation thread, reachable from the resident dashboard
+("Contact the manager") and from **Admin → Messages**. Either side can attach
+**one photo per message**, and a photo with no text is a valid message.
+
+- Images are downscaled in the browser, then re-encoded server-side to JPEG at
+  ≤1600px. Re-encoding is also the sanitiser — whatever is uploaded, what gets
+  stored and served is a plain JPEG.
+- Bytes live in the `messageattachments` collection (not `photos`, which is
+  staff-only) and are served through `/api/messages/attachment/[id]`.
+  **A resident may only read attachments on their own flat's thread**; an
+  admin needs the `messaging` capability and the matching site.
+- Tapping a photo opens a full-screen viewer with zoom and "Open full size".
+
+Attachments are stored in MongoDB like the meter photos, so they count towards
+database size — roughly 150–400 KB each after compression.
+
 ## 🔔 Usage alerts (resident water budgets)
 
 Residents can set a **weekly or monthly water limit** on their dashboard and

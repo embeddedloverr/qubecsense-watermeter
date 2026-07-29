@@ -4,6 +4,12 @@ import { Message } from "@/lib/models/Message";
 import { Flat } from "@/lib/models/Flat";
 import { getSession } from "@/lib/auth";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
+import {
+  storeAttachment,
+  linkAttachment,
+  attachmentPayload,
+  AttachmentError,
+} from "@/lib/messageAttachment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,8 +19,9 @@ function serialise(m: any) {
     id: String(m._id),
     sender: m.sender,
     senderName: m.senderName || "",
-    body: m.body,
+    body: m.body || "",
     category: m.category || null,
+    attachment: attachmentPayload(m),
     createdAt: new Date(m.createdAt).toISOString(),
   };
 }
@@ -55,16 +62,36 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { body, category } = await req.json();
+    const { body, category, image } = await req.json();
     const text = String(body || "").trim();
-    if (!text) {
-      return NextResponse.json({ error: "Type a message." }, { status: 400 });
+    const hasImage = typeof image === "string" && image !== "";
+    // A photo on its own is a complete message — "here is the leak".
+    if (!text && !hasImage) {
+      return NextResponse.json(
+        { error: "Type a message or attach a photo." },
+        { status: 400 }
+      );
     }
     if (text.length > 2000) {
       return NextResponse.json({ error: "Message is too long." }, { status: 400 });
     }
 
     await connectDB();
+
+    let attachment = null;
+    try {
+      attachment = await storeAttachment({
+        dataUrl: image,
+        siteId: session.siteId,
+        flatNumber: flat,
+      });
+    } catch (e) {
+      if (e instanceof AttachmentError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+
     const msg = await Message.create({
       siteId: session.siteId,
       flatNumber: flat,
@@ -74,7 +101,9 @@ export async function POST(req: NextRequest) {
       category: category ? String(category).slice(0, 40) : undefined,
       readByResident: true,
       readByAdmin: false,
+      ...(attachment || {}),
     });
+    if (attachment) await linkAttachment(attachment.attachmentId, msg._id);
 
     // Notify the admin inbox by email (best-effort).
     const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER;
@@ -86,10 +115,13 @@ export async function POST(req: NextRequest) {
       ).lean();
       const who = (flatDoc as any)?.ownerName || session.name || `Flat ${flat}`;
       const tag = category ? `[${category}] ` : "";
+      // The image is not attached to the email — it is only viewable behind a
+      // signed-in session, so the notification points at the thread instead.
+      const photoNote = attachment ? "\n\n📷 A photo is attached to this message — open the thread to view it." : "";
       sendMail({
         to,
-        subject: `New message from Flat ${flat}${category ? ` — ${category}` : ""}`,
-        text: `${who} (Flat ${flat}) wrote:\n\n${tag}${text}\n\nReply: ${appUrl}/admin/messages`,
+        subject: `New message from Flat ${flat}${attachment ? " (with photo)" : ""}${category ? ` — ${category}` : ""}`,
+        text: `${who} (Flat ${flat}) wrote:\n\n${tag}${text || "(no text)"}${photoNote}\n\nReply: ${appUrl}/admin/messages`,
       }).catch((e) => console.error("admin notify failed", e));
     }
 

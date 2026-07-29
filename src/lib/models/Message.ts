@@ -9,9 +9,14 @@ export interface IMessage {
   flatNumber: string;
   sender: "resident" | "admin";
   senderName: string;
+  /** May be empty when the message is an image on its own. */
   body: string;
   /** Optional label for "Report a problem" messages (Leak, Meter, Billing…). */
   category?: string;
+  /** Attached image, stored in the messageattachments collection. */
+  attachmentId?: mongoose.Types.ObjectId;
+  attachmentWidth?: number;
+  attachmentHeight?: number;
   readByAdmin: boolean;
   readByResident: boolean;
   createdAt: Date;
@@ -24,8 +29,13 @@ const MessageSchema = new Schema<IMessage>(
     flatNumber: { type: String, required: true, index: true },
     sender: { type: String, enum: ["resident", "admin"], required: true },
     senderName: { type: String, default: "" },
-    body: { type: String, required: true, trim: true, maxlength: 2000 },
+    // Not required: a photo with no caption is a valid message. The routes
+    // enforce "text or image", which `required` alone cannot express.
+    body: { type: String, default: "", trim: true, maxlength: 2000 },
     category: { type: String },
+    attachmentId: { type: Schema.Types.ObjectId, ref: "MessageAttachment" },
+    attachmentWidth: { type: Number },
+    attachmentHeight: { type: Number },
     readByAdmin: { type: Boolean, default: false },
     readByResident: { type: Boolean, default: false },
   },

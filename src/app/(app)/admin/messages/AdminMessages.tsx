@@ -9,13 +9,19 @@ import {
   Spinner,
   Badge,
 } from "@/components/ui";
-import { IconAlert, IconChevronRight } from "@/components/icons";
+import { IconAlert, IconChevronRight, IconCamera } from "@/components/icons";
 import { useToast } from "@/components/Toast";
+import {
+  AttachPicker,
+  AttachPreview,
+  AttachmentThumb,
+} from "@/components/ChatAttachment";
 
 interface Thread {
   flat: string;
   ownerName: string;
   lastBody: string;
+  lastHasImage: boolean;
   lastSender: "resident" | "admin";
   lastAt: string;
   unread: number;
@@ -27,6 +33,7 @@ interface ChatMessage {
   senderName: string;
   body: string;
   category: string | null;
+  attachment: { url: string; width: number; height: number } | null;
   createdAt: string;
 }
 
@@ -107,9 +114,14 @@ export function AdminMessages() {
                   <p className="truncate text-xs text-muted-foreground">
                     {t.ownerName || "—"}
                   </p>
-                  <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                  <p className="mt-0.5 flex items-center gap-1 truncate text-sm text-muted-foreground">
                     {t.lastSender === "admin" ? "You: " : ""}
-                    {t.lastBody}
+                    {t.lastHasImage && (
+                      <IconCamera className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    )}
+                    <span className="truncate">
+                      {t.lastBody || (t.lastHasImage ? "Photo" : "")}
+                    </span>
                   </p>
                 </div>
                 <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -154,6 +166,7 @@ function Conversation({
   const [phone, setPhone] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
   const [body, setBody] = React.useState("");
+  const [image, setImage] = React.useState<string | null>(null);
   const [sending, setSending] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -190,13 +203,13 @@ function Conversation({
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = body.trim();
-    if (!text) return;
+    if (!text && !image) return;
     setSending(true);
     try {
       const res = await fetch(`/api/messages/${flat}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: text }),
+        body: JSON.stringify({ body: text, image }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -205,6 +218,7 @@ function Conversation({
       }
       setMessages((m) => [...m, data.message]);
       setBody("");
+      setImage(null);
       onChanged();
     } catch {
       toast("Network error. Please try again.", "error");
@@ -267,7 +281,18 @@ function Conversation({
                     {m.category}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                {m.body && (
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                )}
+                {m.attachment && (
+                  <AttachmentThumb
+                    attachment={m.attachment}
+                    caption={
+                      m.body ||
+                      `Flat ${flat}${m.category ? ` · ${m.category}` : ""}`
+                    }
+                  />
+                )}
                 <p
                   className={`mt-0.5 text-[10px] ${
                     m.sender === "admin"
@@ -291,8 +316,22 @@ function Conversation({
           rows={2}
           maxLength={2000}
         />
-        <div className="flex justify-end">
-          <Button type="submit" size="md" loading={sending} disabled={!body.trim()}>
+        {image && (
+          <AttachPreview dataUrl={image} onRemove={() => setImage(null)} />
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <AttachPicker
+            value={image}
+            onChange={setImage}
+            disabled={sending}
+            onError={(msg) => toast(msg, "error")}
+          />
+          <Button
+            type="submit"
+            size="md"
+            loading={sending}
+            disabled={!body.trim() && !image}
+          >
             Send reply
           </Button>
         </div>

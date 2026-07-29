@@ -30,6 +30,11 @@ import {
 } from "@/components/icons";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
+import {
+  AttachPicker,
+  AttachPreview,
+  AttachmentThumb,
+} from "@/components/ChatAttachment";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
 
 interface SlabCharge {
@@ -555,13 +560,19 @@ export function ResidentView({
   } | null;
 }) {
   if (!flat || flat.meters.length === 0) {
+    // Still show the chat. A resident with no readings is precisely the one
+    // who needs to tell someone — previously this early return replaced the
+    // whole dashboard, so they had no way to report it from the app at all.
     return (
-      <Card>
-        <CardContent className="py-12 text-center text-sm text-muted-foreground">
-          No meter readings have been received for your flat yet. Please check
-          back once your meters start reporting.
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            No meter readings have been received for your flat yet. Please check
+            back once your meters start reporting — or send us a message below.
+          </CardContent>
+        </Card>
+        <ContactCard />
+      </div>
     );
   }
 
@@ -788,6 +799,7 @@ interface ChatMessage {
   senderName: string;
   body: string;
   category: string | null;
+  attachment: { url: string; width: number; height: number } | null;
   createdAt: string;
 }
 
@@ -804,6 +816,7 @@ function ContactCard() {
   const [loaded, setLoaded] = React.useState(false);
   const [body, setBody] = React.useState("");
   const [category, setCategory] = React.useState<string | null>(null);
+  const [image, setImage] = React.useState<string | null>(null);
   const [sending, setSending] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const taRef = React.useRef<HTMLTextAreaElement>(null);
@@ -839,13 +852,14 @@ function ContactCard() {
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = body.trim();
-    if (!text) return;
+    // A photo on its own is a complete report.
+    if (!text && !image) return;
     setSending(true);
     try {
       const res = await fetch("/api/resident/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: text, category }),
+        body: JSON.stringify({ body: text, category, image }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -855,6 +869,7 @@ function ContactCard() {
       setMessages((m) => [...m, data.message]);
       setBody("");
       setCategory(null);
+      setImage(null);
     } catch {
       toast("Network error. Please try again.", "error");
     } finally {
@@ -927,7 +942,15 @@ function ContactCard() {
                       {m.category}
                     </p>
                   )}
-                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                  {m.body && (
+                    <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                  )}
+                  {m.attachment && (
+                    <AttachmentThumb
+                      attachment={m.attachment}
+                      caption={m.body || m.category || undefined}
+                    />
+                  )}
                   <p
                     className={`mt-0.5 text-[10px] ${
                       m.sender === "resident"
@@ -959,16 +982,28 @@ function ContactCard() {
             rows={2}
             maxLength={2000}
           />
-          <div className="flex justify-end">
+          {image && (
+            <AttachPreview dataUrl={image} onRemove={() => setImage(null)} />
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <AttachPicker
+              value={image}
+              onChange={setImage}
+              disabled={sending}
+              onError={(msg) => toast(msg, "error")}
+            />
             <Button
               type="submit"
               size="md"
               loading={sending}
-              disabled={!body.trim()}
+              disabled={!body.trim() && !image}
             >
               Send
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            A photo helps us fix things faster — a leak, the meter, or your bill.
+          </p>
         </form>
       </CardContent>
     </Card>
