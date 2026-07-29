@@ -21,6 +21,37 @@ export type Capability =
   | "schedule"
   | "technicians";
 
+/** Every capability that exists. One list, imported wherever caps are built. */
+export const ALL_CAPABILITIES: Capability[] = [
+  "view_data",
+  "exports",
+  "billing",
+  "residents",
+  "messaging",
+  "records",
+  "schedule",
+  "technicians",
+];
+
+/**
+ * Reserved for the superadmin.
+ *
+ * Installation scheduling and the field team are run centrally rather than by
+ * a building's own admin, so these are stripped from every site admin's
+ * effective set — including any stale grant that still carries them. Doing it
+ * in one place means the nav, the pages and the APIs all follow from this
+ * single decision rather than each remembering to check.
+ */
+export const SUPERADMIN_ONLY_CAPABILITIES: Capability[] = [
+  "schedule",
+  "technicians",
+];
+
+/** What a superadmin may hand to a site admin. */
+export const GRANTABLE_CAPABILITIES: Capability[] = ALL_CAPABILITIES.filter(
+  (c) => !SUPERADMIN_ONLY_CAPABILITIES.includes(c)
+);
+
 export interface SessionPayload {
   sub: string;
   name: string;

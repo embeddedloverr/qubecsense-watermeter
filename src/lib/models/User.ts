@@ -5,27 +5,16 @@ import mongoose, { Schema, model, models } from "mongoose";
 export type { Role } from "../session";
 import type { Role } from "../session";
 
-/** What an admin may do within a site. Maps 1:1 to nav items. */
-export type Capability =
-  | "view_data"
-  | "exports"
-  | "billing"
-  | "residents"
-  | "messaging"
-  | "records"
-  | "schedule"
-  | "technicians";
-
-export const ALL_CAPABILITIES: Capability[] = [
-  "view_data",
-  "exports",
-  "billing",
-  "residents",
-  "messaging",
-  "records",
-  "schedule",
-  "technicians",
-];
+// Same reason as Role above: capabilities live in session.ts and are
+// re-exported, never re-declared. Three copies of this list had already
+// appeared before it was consolidated.
+export type { Capability } from "../session";
+import type { Capability } from "../session";
+export {
+  ALL_CAPABILITIES,
+  GRANTABLE_CAPABILITIES,
+  SUPERADMIN_ONLY_CAPABILITIES,
+} from "../session";
 
 /** One site an admin can act in, and what they may do there. */
 export interface ISiteAccess {

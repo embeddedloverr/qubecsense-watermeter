@@ -38,6 +38,8 @@ interface NavItem {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   /** Hidden unless the user holds this capability. */
   cap?: Capability;
+  /** Superadmin-only section — a site admin never sees it. */
+  superOnly?: boolean;
 }
 
 const techNav: NavItem[] = [
@@ -48,12 +50,12 @@ const techNav: NavItem[] = [
 const adminNav: NavItem[] = [
   { href: "/admin/live-data", label: "Live Data", icon: IconGauge, cap: "view_data" },
   { href: "/admin/billing", label: "Billing", icon: IconRupee, cap: "billing" },
-  { href: "/admin", label: "Overview", icon: IconDashboard },
-  { href: "/admin/schedule", label: "Schedule", icon: IconCalendar, cap: "schedule" },
+  { href: "/admin", label: "Overview", icon: IconDashboard, superOnly: true },
+  { href: "/admin/schedule", label: "Schedule", icon: IconCalendar, cap: "schedule", superOnly: true },
   { href: "/admin/installations", label: "Records", icon: IconHome, cap: "records" },
   { href: "/admin/residents", label: "Residents", icon: IconUsers, cap: "residents" },
   { href: "/admin/messages", label: "Messages", icon: IconMessage, cap: "messaging" },
-  { href: "/admin/technicians", label: "Team", icon: IconUsers, cap: "technicians" },
+  { href: "/admin/technicians", label: "Team", icon: IconUsers, cap: "technicians", superOnly: true },
 ];
 
 const residentNav: NavItem[] = [
@@ -78,10 +80,18 @@ export function AppShell({
         : techNav;
 
   // Hide anything the admin has not been granted. caps undefined means the
-  // role has no capability model (technician / resident), so show everything.
-  const nav = user.caps
-    ? baseNav.filter((i) => !i.cap || user.caps!.includes(i.cap))
-    : baseNav;
+  // role has no capability model (technician / resident / superadmin), so
+  // show everything.
+  //
+  // superOnly is checked against the role rather than the capability set on
+  // purpose: sessions last 7 days, so an admin signed in before this shipped
+  // still carries the old caps in their token and would otherwise keep seeing
+  // links that now redirect.
+  const nav = baseNav.filter(
+    (i) =>
+      (!i.superOnly || user.role === "superadmin") &&
+      (!user.caps || !i.cap || user.caps.includes(i.cap))
+  );
 
   const can = (c: Capability) => !user.caps || user.caps.includes(c);
 

@@ -1,19 +1,13 @@
 import { User, type IUser } from "./models/User";
 import { Flat } from "./models/Flat";
 import { Site } from "./models/Site";
-import type { Capability, SessionPayload } from "./session";
+import {
+  ALL_CAPABILITIES,
+  SUPERADMIN_ONLY_CAPABILITIES,
+  type Capability,
+  type SessionPayload,
+} from "./session";
 import type { HydratedDocument } from "mongoose";
-
-const ALL_CAPS: Capability[] = [
-  "view_data",
-  "exports",
-  "billing",
-  "residents",
-  "messaging",
-  "records",
-  "schedule",
-  "technicians",
-];
 
 /**
  * Build the JWT claims for a user. Shared by the password login and the OTP
@@ -47,7 +41,12 @@ export async function sessionPayloadFor(
     );
     // Transitional: admins without an explicit grant keep full access. Mirrors
     // the same fallback in guard.ts; both go once grants are backfilled.
-    caps = grant ? (grant.capabilities as Capability[]) : ALL_CAPS;
+    const granted = grant
+      ? (grant.capabilities as Capability[])
+      : ALL_CAPABILITIES;
+    // Must drop the reserved ones exactly as guard() does, or the nav renders
+    // links that 403 the moment they are clicked.
+    caps = granted.filter((c) => !SUPERADMIN_ONLY_CAPABILITIES.includes(c));
   }
 
   return {

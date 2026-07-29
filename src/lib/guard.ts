@@ -6,7 +6,12 @@ import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
 import { Site, type ISite } from "@/lib/models/Site";
 import { homeFor } from "@/lib/utils";
-import type { Capability, SessionPayload } from "@/lib/session";
+import {
+  ALL_CAPABILITIES,
+  SUPERADMIN_ONLY_CAPABILITIES,
+  type Capability,
+  type SessionPayload,
+} from "@/lib/session";
 
 // Central authorisation. Every protected route resolves a site context here,
 // then scopes its queries with `scoped(ctx, ...)`.
@@ -57,7 +62,7 @@ async function resolve(
   let caps = new Set<Capability>();
 
   if (isSuperadmin) {
-    caps = new Set(ALL_CAPS);
+    caps = new Set(ALL_CAPABILITIES);
   } else {
     const user = await User.findById(session.sub).select(
       "role active siteId siteAccess"
@@ -78,7 +83,7 @@ async function resolve(
       // grant yet keeps full access, so the existing admin is never locked out
       // between deploying this and running the grant migration.
       // Remove once every admin has a siteAccess entry.
-      caps = new Set(ALL_CAPS);
+      caps = new Set(ALL_CAPABILITIES);
     } else if (
       user.role === "technician" &&
       String(user.siteId || "") === String(targetSiteId)
@@ -88,6 +93,11 @@ async function resolve(
     } else {
       return { ok: false, reason: "forbidden" };
     }
+
+    // Reserved capabilities never survive to a non-superadmin, whatever the
+    // grant or the fallback above handed out. This single line is what keeps
+    // Schedule and Team out of the admin nav, its pages and its APIs.
+    for (const c of SUPERADMIN_ONLY_CAPABILITIES) caps.delete(c);
 
     if (requiredCaps.some((c) => !caps.has(c))) {
       return { ok: false, reason: "forbidden" };
@@ -111,17 +121,6 @@ async function resolve(
     },
   };
 }
-
-const ALL_CAPS: Capability[] = [
-  "view_data",
-  "exports",
-  "billing",
-  "residents",
-  "messaging",
-  "records",
-  "schedule",
-  "technicians",
-];
 
 /** Route handlers: returns a ready-to-return response on failure. */
 export async function guard(

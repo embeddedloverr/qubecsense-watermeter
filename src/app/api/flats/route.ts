@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Installation } from "@/lib/models/Installation";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 /** Returns the site's flats annotated with whether they're already installed.
  *  Staff only — this carries owner names, emails and phone numbers, so a
  *  resident must not be able to pull the whole owner directory. */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -19,7 +19,11 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const g = await guardSite();
+  // ?site=<id> lets a superadmin read another site's flats from the site view.
+  // guard() only honours it when the caller actually has access to that site.
+  const g = await guardSite({
+    siteId: req.nextUrl.searchParams.get("site") || undefined,
+  });
   if (!g.ok) return g.res;
   const siteId = g.ctx.siteId;
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { User, ALL_CAPABILITIES, type Capability } from "@/lib/models/User";
+import { User, GRANTABLE_CAPABILITIES, type Capability } from "@/lib/models/User";
 import { guardSuperadmin } from "@/lib/guard";
 
 export const runtime = "nodejs";
@@ -59,7 +59,7 @@ export async function PATCH(
         .map((a: any) => ({
           siteId: new Types.ObjectId(String(a.siteId)),
           capabilities: (Array.isArray(a.capabilities) ? a.capabilities : []).filter(
-            (c: string) => ALL_CAPABILITIES.includes(c as Capability)
+            (c: string) => GRANTABLE_CAPABILITIES.includes(c as Capability)
           ),
         }));
       user.siteAccess = cleaned;

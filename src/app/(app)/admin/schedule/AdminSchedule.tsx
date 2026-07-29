@@ -43,8 +43,12 @@ interface SchedEntry {
   status: string;
 }
 
-export function AdminSchedule() {
+/** `siteId` is supplied only when mounted in the superadmin site view; the
+ *  /admin mount relies on the site in the session. */
+export function AdminSchedule({ siteId }: { siteId?: string } = {}) {
   const { toast } = useToast();
+  const site = siteId ? `site=${encodeURIComponent(siteId)}` : "";
+  const qs = site ? `?${site}` : "";
   const [techs, setTechs] = React.useState<Tech[]>([]);
   const [flats, setFlats] = React.useState<FlatOpt[]>([]);
   const [schedule, setSchedule] = React.useState<SchedEntry[]>([]);
@@ -58,15 +62,17 @@ export function AdminSchedule() {
 
   const load = React.useCallback(async () => {
     const [t, f, s] = await Promise.all([
-      fetch("/api/technicians").then((r) => r.json()),
-      fetch("/api/flats").then((r) => r.json()),
-      fetch("/api/schedule?status=planned").then((r) => r.json()),
+      fetch(`/api/technicians${qs}`).then((r) => r.json()),
+      fetch(`/api/flats${qs}`).then((r) => r.json()),
+      fetch(`/api/schedule?status=planned${site ? `&${site}` : ""}`).then((r) =>
+        r.json()
+      ),
     ]);
     setTechs(t.technicians || []);
     setFlats(f.flats || []);
     setSchedule(s.schedule || []);
     setLoading(false);
-  }, []);
+  }, [qs, site]);
 
   React.useEffect(() => {
     load();
@@ -102,7 +108,7 @@ export function AdminSchedule() {
     if (picked.size === 0) return toast("Pick at least one flat.", "error");
     setSaving(true);
     try {
-      const res = await fetch("/api/schedule", {
+      const res = await fetch(`/api/schedule${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -124,7 +130,10 @@ export function AdminSchedule() {
   };
 
   const remove = async (id: string) => {
-    const res = await fetch(`/api/schedule?id=${id}`, { method: "DELETE" });
+    const res = await fetch(
+      `/api/schedule?id=${id}${site ? `&${site}` : ""}`,
+      { method: "DELETE" }
+    );
     if (res.ok) {
       setSchedule((prev) => prev.filter((s) => s._id !== id));
       toast("Removed from schedule.", "success");

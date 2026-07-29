@@ -9,7 +9,10 @@ import {
   setSessionCookie,
 } from "@/lib/auth";
 import type { Capability } from "@/lib/session";
-import { ALL_CAPABILITIES } from "@/lib/models/User";
+import {
+  ALL_CAPABILITIES,
+  SUPERADMIN_ONLY_CAPABILITIES,
+} from "@/lib/models/User";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +60,11 @@ export async function POST(req: NextRequest) {
       if (!grant && String(user.siteId || "") !== String(site._id)) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      caps = grant ? (grant.capabilities as Capability[]) : ALL_CAPABILITIES;
+      // Reserved capabilities are stripped exactly as guard() strips them,
+      // so the nav this token drives matches what the routes will allow.
+      caps = (
+        grant ? (grant.capabilities as Capability[]) : ALL_CAPABILITIES
+      ).filter((c) => !SUPERADMIN_ONLY_CAPABILITIES.includes(c));
     }
 
     const token = await createSessionToken({

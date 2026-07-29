@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { User, ALL_CAPABILITIES } from "@/lib/models/User";
+import { User, GRANTABLE_CAPABILITIES } from "@/lib/models/User";
 import { Site } from "@/lib/models/Site";
 import { guardSuperadmin } from "@/lib/guard";
 import { hashPassword } from "@/lib/auth";
@@ -26,7 +26,7 @@ export async function GET() {
   const siteById = new Map(sites.map((s) => [String(s._id), s]));
 
   return NextResponse.json({
-    capabilities: ALL_CAPABILITIES,
+    capabilities: GRANTABLE_CAPABILITIES,
     sites: sites.map((s) => ({ id: String(s._id), name: s.name, slug: s.slug })),
     admins: admins.map((a) => ({
       id: String(a._id),
@@ -76,8 +76,8 @@ export async function POST(req: NextRequest) {
     }
 
     const caps = Array.isArray(capabilities)
-      ? capabilities.filter((c: string) => ALL_CAPABILITIES.includes(c as any))
-      : ALL_CAPABILITIES;
+      ? capabilities.filter((c: string) => GRANTABLE_CAPABILITIES.includes(c as any))
+      : GRANTABLE_CAPABILITIES;
 
     const user = await User.create({
       name,

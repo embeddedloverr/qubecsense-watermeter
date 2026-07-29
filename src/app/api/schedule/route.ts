@@ -19,8 +19,13 @@ export async function GET(req: NextRequest) {
   if (session.role === "resident") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // ?site=<id> lets a superadmin plan another site from the site view.
+  // guard() only honours it when the caller actually has access to that site.
+  const explicitSite = req.nextUrl.searchParams.get("site") || undefined;
   const g =
-    session.role === "technician" ? await guardSite() : await guard("schedule");
+    session.role === "technician"
+      ? await guardSite()
+      : await guard("schedule", { siteId: explicitSite });
   if (!g.ok) return g.res;
 
   await connectDB();
@@ -46,7 +51,9 @@ export async function GET(req: NextRequest) {
 
 /** Admin assigns one or more flats to a technician on a date. */
 export async function POST(req: NextRequest) {
-  const gp = await guard("schedule");
+  const gp = await guard("schedule", {
+    siteId: req.nextUrl.searchParams.get("site") || undefined,
+  });
   if (!gp.ok) return gp.res;
   const siteId = gp.ctx.siteId;
 
@@ -118,7 +125,9 @@ export async function POST(req: NextRequest) {
 
 /** Admin removes a schedule entry. */
 export async function DELETE(req: NextRequest) {
-  const g = await guard("schedule");
+  const g = await guard("schedule", {
+    siteId: req.nextUrl.searchParams.get("site") || undefined,
+  });
   if (!g.ok) return g.res;
 
   const { searchParams } = new URL(req.url);
