@@ -162,8 +162,11 @@ function sumByLocation(meters: Meter[], location: string) {
  *  charge, total) on one line, for spreadsheet work: sorting, filtering, a
  *  pivot table, importing into an accounting tool. The per-meter totalizer
  *  detail lives in the Detailed CSV instead — this one is meant to open
- *  cleanly with exactly as many rows as there are flats. */
-function buildFlatCsv(report: Report): string {
+ *  cleanly with exactly as many rows as there are flats.
+ *
+ *  Takes `rows` separately from `report` so a search-narrowed export
+ *  contains only what's on screen, not every flat in the period. */
+function buildFlatCsv(report: Report, rows: BillRow[]): string {
   const header = [
     "Flat",
     "Owner",
@@ -175,7 +178,7 @@ function buildFlatCsv(report: Report): string {
     "Fixed charge (₹)",
     "Amount (₹)",
   ];
-  const rows = report.rows.map((r) => [
+  const csvRows = rows.map((r) => [
     r.flat,
     r.ownerName,
     r.ownerPhone,
@@ -189,15 +192,16 @@ function buildFlatCsv(report: Report): string {
     r.fixedCharge.toFixed(2),
     r.amount.toFixed(2),
   ]);
-  return [header, ...rows]
+  return [header, ...csvRows]
     .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
     .join("\n");
 }
 
 /** One row per METER, not per flat — includes device id and the exact
  *  totalizer readings the bill was computed from, so the export can stand in
- *  for an audit trail, not just a total. */
-function buildDetailedCsv(report: Report): string {
+ *  for an audit trail, not just a total. Also takes `rows` separately, same
+ *  reason as buildFlatCsv. */
+function buildDetailedCsv(flatRows: BillRow[]): string {
   const header = [
     "Flat",
     "Owner",
@@ -215,7 +219,7 @@ function buildDetailedCsv(report: Report): string {
     "Amount (₹)",
   ];
   const rows: (string | number)[][] = [];
-  for (const r of report.rows) {
+  for (const r of flatRows) {
     const meters = r.meters.length ? r.meters : [null];
     for (const m of meters) {
       rows.push([
@@ -243,8 +247,11 @@ function buildDetailedCsv(report: Report): string {
 
 /** Summary PDF: one row per flat — Flat, Owner, Kitchen/Bathroom/Total
  *  litres, Amount. Meter-level detail (device id, totalizer) belongs in the
- *  CSV, which residents don't need but an operator auditing a bill does. */
-async function buildPdf(report: Report): Promise<Blob> {
+ *  CSV, which residents don't need but an operator auditing a bill does.
+ *  `rows` is separate from `report` for the same reason as the CSVs — a
+ *  search-narrowed PDF should total only what it lists, not the whole
+ *  period. */
+async function buildPdf(report: Report, rows: BillRow[]): Promise<Blob> {
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -270,7 +277,7 @@ async function buildPdf(report: Report): Promise<Blob> {
     y
   );
 
-  const body = report.rows.map((r) => [
+  const body = rows.map((r) => [
     r.flat,
     r.ownerName || "—",
     litres(sumByLocation(r.meters, "kitchen")),
@@ -279,6 +286,11 @@ async function buildPdf(report: Report): Promise<Blob> {
     rupeesPdf(r.amount) + (r.complete ? "" : " *"),
   ]);
 
+  const withReading = rows.filter((r) => hasReading(r.meters));
+  const totalLitres = withReading.reduce((a, r) => a + r.litres, 0);
+  const totalAmount = rows.reduce((a, r) => a + r.amount, 0);
+  const incompleteCount = rows.filter((r) => !r.complete).length;
+
   autoTable(doc, {
     startY: y + 16,
     head: [["Flat", "Owner", "Kitchen (L)", "Bathroom (L)", "Total (L)", "Amount"]],
@@ -286,15 +298,13 @@ async function buildPdf(report: Report): Promise<Blob> {
     foot: [
       [
         {
-          content: `${report.flatCount} flat(s)${
-            report.incompleteCount
-              ? ` · ${report.incompleteCount} incomplete (*)`
-              : ""
+          content: `${rows.length} flat(s)${
+            incompleteCount ? ` · ${incompleteCount} incomplete (*)` : ""
           }`,
           colSpan: 4,
         } as any,
-        litres(report.totalLitres),
-        rupeesPdf(report.totalAmount),
+        litres(totalLitres),
+        rupeesPdf(totalAmount),
       ],
     ],
     styles: { fontSize: 9, cellPadding: 4 },
@@ -568,6 +578,7 @@ export function AdminBilling() {
   const [active, setActive] = React.useState<BillRow | null>(null);
   const [tariffConfigured, setTariffConfigured] = React.useState(true);
   const [exportingPdf, setExportingPdf] = React.useState(false);
+  const [query, setQuery] = React.useState("");
 
   const generate = React.useCallback(async () => {
     if (period === "range") {
@@ -603,9 +614,42 @@ export function AdminBilling() {
     generate();
   }, [generate]);
 
+  // Search narrows both the table AND the exports — "show me flat 501" should
+  // mean the CSV/PDF someone downloads next also has just flat 501, not the
+  // whole period they happened to be looking at. KPIs stay on the full
+  // report regardless, since "Total billed" should mean the whole bill run.
+  const filtered = React.useMemo(() => {
+    if (!report) return [];
+    const q = query.trim().toLowerCase();
+    const rows = !q
+      ? report.rows
+      : report.rows.filter(
+          (r) =>
+            r.flat.toLowerCase().includes(q) ||
+            (r.ownerName || "").toLowerCase().includes(q)
+        );
+    return [...rows].sort((a, b) => {
+      const na = parseInt(a.flat, 10);
+      const nb = parseInt(b.flat, 10);
+      if (Number.isNaN(na) || Number.isNaN(nb)) return a.flat.localeCompare(b.flat);
+      return na - nb;
+    });
+  }, [report, query]);
+
+  // The table's own footer sums what's actually listed — with a search
+  // active, showing the whole period's total under 2 visible rows would
+  // look like the filter did nothing.
+  const filteredTotals = React.useMemo(() => {
+    const withReading = filtered.filter((r) => hasReading(r.meters));
+    return {
+      totalLitres: withReading.reduce((a, r) => a + r.litres, 0),
+      totalAmount: filtered.reduce((a, r) => a + r.amount, 0),
+    };
+  }, [filtered]);
+
   const exportFlatCsv = () => {
     if (!report) return;
-    const blob = new Blob([buildFlatCsv(report)], {
+    const blob = new Blob([buildFlatCsv(report, filtered)], {
       type: "text/csv;charset=utf-8;",
     });
     download(blob, `qubecsense-bills-${periodStamp(report)}.csv`);
@@ -613,7 +657,7 @@ export function AdminBilling() {
 
   const exportDetailedCsv = () => {
     if (!report) return;
-    const blob = new Blob([buildDetailedCsv(report)], {
+    const blob = new Blob([buildDetailedCsv(filtered)], {
       type: "text/csv;charset=utf-8;",
     });
     download(blob, `qubecsense-bills-detailed-${periodStamp(report)}.csv`);
@@ -623,7 +667,7 @@ export function AdminBilling() {
     if (!report) return;
     setExportingPdf(true);
     try {
-      const blob = await buildPdf(report);
+      const blob = await buildPdf(report, filtered);
       download(blob, `qubecsense-bills-${periodStamp(report)}.pdf`);
     } catch {
       toast("Could not build the PDF. Please try again.", "error");
@@ -695,6 +739,13 @@ export function AdminBilling() {
               />
             </div>
           )}
+
+          <Input
+            placeholder="Search flat or owner…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full sm:w-56 print:hidden"
+          />
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button variant="outline" size="md" onClick={generate} loading={loading}>
@@ -852,6 +903,12 @@ export function AdminBilling() {
                 No flats to bill for this period.
               </CardContent>
             </Card>
+          ) : filtered.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                No flats match &ldquo;{query}&rdquo;.
+              </CardContent>
+            </Card>
           ) : (
             <Card className="overflow-hidden print:border-0 print:shadow-none">
               {/* Desktop + print table */}
@@ -867,7 +924,7 @@ export function AdminBilling() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {report.rows.map((r) => {
+                    {filtered.map((r) => {
                       const got = hasReading(r.meters);
                       return (
                         <tr key={r.flat} className="hover:bg-muted/40">
@@ -909,8 +966,8 @@ export function AdminBilling() {
                     <tr className="border-t border-border bg-muted/40 font-semibold">
                       <td className="px-5 py-3">Total</td>
                       <td className="px-5 py-3" />
-                      <td className="tabular px-5 py-3">{litres(report.totalLitres)}</td>
-                      <td className="tabular px-5 py-3">{rupees(report.totalAmount)}</td>
+                      <td className="tabular px-5 py-3">{litres(filteredTotals.totalLitres)}</td>
+                      <td className="tabular px-5 py-3">{rupees(filteredTotals.totalAmount)}</td>
                       <td className="print:hidden" />
                     </tr>
                   </tfoot>
@@ -919,7 +976,7 @@ export function AdminBilling() {
 
               {/* Mobile list */}
               <ul className="divide-y divide-border md:hidden print:hidden">
-                {report.rows.map((r) => {
+                {filtered.map((r) => {
                   const got = hasReading(r.meters);
                   return (
                     <li key={r.flat}>
@@ -950,7 +1007,7 @@ export function AdminBilling() {
                 })}
                 <li className="flex items-center justify-between px-4 py-3 font-semibold">
                   <span>Total</span>
-                  <span className="tabular">{rupees(report.totalAmount)}</span>
+                  <span className="tabular">{rupees(filteredTotals.totalAmount)}</span>
                 </li>
               </ul>
             </Card>
