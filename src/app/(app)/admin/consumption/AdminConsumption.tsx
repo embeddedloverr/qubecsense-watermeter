@@ -41,7 +41,9 @@ interface FlatEntry {
   consumptionLitres: number;
   complete: boolean;
   meters: Meter[];
-  computedAt: string;
+  // daily/monthly only — a custom range is computed live on every request
+  // rather than served from a stored rollup, so there's no "computed at".
+  computedAt?: string;
   // monthly only
   isPartialMonth?: boolean;
   latestDateUsed?: string;
@@ -50,11 +52,13 @@ interface FlatEntry {
 interface ApiResponse {
   date?: string;
   month?: string;
+  from?: string;
+  to?: string;
   flatCount: number;
   flats: FlatEntry[];
 }
 
-type Period = "daily" | "monthly";
+type Period = "daily" | "monthly" | "range";
 
 const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;
 
@@ -65,6 +69,11 @@ const ANOMALY_LABEL: Record<string, string> = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const thisMonthISO = () => new Date().toISOString().slice(0, 7);
+const daysAgoISO = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
 
 /* --------------------------------- Cards ---------------------------------- */
 
@@ -187,9 +196,11 @@ function FlatRow({ entry, period }: { entry: FlatEntry; period: Period }) {
               ))}
             </div>
           )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Computed {formatDateTime(entry.computedAt)}
-          </p>
+          {entry.computedAt && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Computed {formatDateTime(entry.computedAt)}
+            </p>
+          )}
         </div>
       )}
     </li>
@@ -202,19 +213,32 @@ export function AdminConsumption() {
   const [period, setPeriod] = React.useState<Period>("daily");
   const [date, setDate] = React.useState(todayISO());
   const [month, setMonth] = React.useState(thisMonthISO());
+  const [from, setFrom] = React.useState(daysAgoISO(6));
+  const [to, setTo] = React.useState(todayISO());
+  const [rangeError, setRangeError] = React.useState<string | null>(null);
   const [data, setData] = React.useState<ApiResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
 
   const load = React.useCallback(async () => {
+    if (period === "range") {
+      if (!from || !to) return;
+      if (from > to) {
+        setRangeError("The start date must be on or before the end date.");
+        return;
+      }
+    }
+    setRangeError(null);
     setLoading(true);
     setError(null);
     try {
       const qs =
         period === "monthly"
           ? `period=monthly&month=${month}`
-          : `period=daily&date=${date}`;
+          : period === "range"
+            ? `period=range&from=${from}&to=${to}`
+            : `period=daily&date=${date}`;
       const res = await fetch(`/api/consumption?${qs}`, { cache: "no-store" });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || "Failed to load consumption.");
@@ -225,7 +249,7 @@ export function AdminConsumption() {
     } finally {
       setLoading(false);
     }
-  }, [period, date, month]);
+  }, [period, date, month, from, to]);
 
   React.useEffect(() => {
     load();
@@ -296,7 +320,9 @@ export function AdminConsumption() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `qubecsense-consumption-${period === "monthly" ? month : date}.csv`;
+    const stamp =
+      period === "monthly" ? month : period === "range" ? `${from}_to_${to}` : date;
+    a.download = `qubecsense-consumption-${stamp}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -309,10 +335,16 @@ export function AdminConsumption() {
             Consumption
           </h1>
           <p className="text-sm text-muted-foreground">
-            Exact usage from meter totalizers — daily and monthly, per flat.
+            Exact usage from meter totalizers — daily, monthly, or a custom
+            range, per flat.
           </p>
         </div>
-        <Button variant="outline" size="md" onClick={exportCsv} disabled={!data?.flats.length}>
+        <Button
+          variant="outline"
+          size="md"
+          onClick={exportCsv}
+          disabled={!data?.flats.length || !!rangeError}
+        >
           Quick CSV
         </Button>
       </div>
@@ -321,7 +353,7 @@ export function AdminConsumption() {
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 pt-5">
           <div className="inline-flex rounded-lg border border-border p-0.5">
-            {(["daily", "monthly"] as Period[]).map((p) => (
+            {(["daily", "monthly", "range"] as Period[]).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -336,7 +368,7 @@ export function AdminConsumption() {
             ))}
           </div>
 
-          {period === "daily" ? (
+          {period === "daily" && (
             <Input
               type="date"
               value={date}
@@ -344,7 +376,8 @@ export function AdminConsumption() {
               onChange={(e) => setDate(e.target.value)}
               className="w-auto"
             />
-          ) : (
+          )}
+          {period === "monthly" && (
             <Input
               type="month"
               value={month}
@@ -352,6 +385,28 @@ export function AdminConsumption() {
               onChange={(e) => setMonth(e.target.value)}
               className="w-auto"
             />
+          )}
+          {period === "range" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                value={from}
+                max={to || todayISO()}
+                onChange={(e) => setFrom(e.target.value)}
+                className="w-auto"
+                aria-label="From date"
+              />
+              <span className="text-sm text-muted-foreground">to</span>
+              <Input
+                type="date"
+                value={to}
+                min={from || undefined}
+                max={todayISO()}
+                onChange={(e) => setTo(e.target.value)}
+                className="w-auto"
+                aria-label="To date"
+              />
+            </div>
           )}
 
           <Input
@@ -362,6 +417,14 @@ export function AdminConsumption() {
           />
         </CardContent>
       </Card>
+
+      {rangeError && (
+        <Card>
+          <CardContent className="py-4 text-center text-sm text-destructive">
+            {rangeError}
+          </CardContent>
+        </Card>
+      )}
 
       {error && (
         <Card>
@@ -386,9 +449,14 @@ export function AdminConsumption() {
               <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
                 No meter had a reading at the start of{" "}
-                {period === "monthly" ? "this month" : "this period"} — usually
-                because installation happened partway through it. Try a more
-                recent {period === "monthly" ? "month" : "date"}.
+                {period === "monthly"
+                  ? "this month"
+                  : period === "range"
+                    ? "this range"
+                    : "this period"}{" "}
+                — usually because installation happened partway through it. Try
+                a more recent{" "}
+                {period === "monthly" ? "month" : period === "range" ? "range" : "date"}.
               </span>
             </div>
           )}
@@ -399,7 +467,13 @@ export function AdminConsumption() {
               <StatCard
                 label="Flats"
                 value={data.flatCount}
-                sub={period === "monthly" ? month : date}
+                sub={
+                  period === "monthly"
+                    ? month
+                    : period === "range"
+                      ? `${from} → ${to}`
+                      : date
+                }
                 icon={IconHome}
                 tone="primary"
               />
@@ -411,7 +485,9 @@ export function AdminConsumption() {
                     ? `${kpis.noData} flat(s) excluded — no data`
                     : period === "daily"
                       ? "That day"
-                      : "That month"
+                      : period === "range"
+                        ? "That range"
+                        : "That month"
                 }
                 icon={IconDroplet}
                 tone="success"
