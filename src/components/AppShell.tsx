@@ -49,6 +49,7 @@ const techNav: NavItem[] = [
 
 const adminNav: NavItem[] = [
   { href: "/admin/live-data", label: "Live Data", icon: IconGauge, cap: "view_data" },
+  { href: "/admin/consumption", label: "Consumption", icon: IconDroplet, cap: "view_data" },
   { href: "/admin/billing", label: "Billing", icon: IconRupee, cap: "billing" },
   { href: "/admin", label: "Overview", icon: IconDashboard, superOnly: true },
   { href: "/admin/schedule", label: "Schedule", icon: IconCalendar, cap: "schedule", superOnly: true },

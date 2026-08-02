@@ -204,6 +204,24 @@ ones, and the script **aborts** if any real detail is still visible, so the
 guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 `guide-preview.png` of the whole document.
 
+## 📅 Consumption (daily / monthly)
+
+**Admin → Consumption** shows exact per-flat usage from nudron-dashboard's
+`/api/v1/flat-consumption/*` endpoints — totalizer deltas, not the intraday
+sums Live Data uses, and served from pre-computed rollups
+(`flatDailyConsumption` / `flatMonthlyConsumption`), so it stays fast
+regardless of how large the raw `readings` collection grows.
+
+Each flat can be expanded to see the per-meter totalizer readings behind the
+total, and two anomalies are called out explicitly rather than silently
+folded into the number: `no_reading_in_period` (nothing to compute from) and
+`totalizer_decreased` (almost always a meter reset or replacement, not
+negative consumption) — both mark that flat's total `incomplete`.
+
+Uses the same per-site credentials as Live Data (`resolveSiteCreds`), just
+against a sibling path on the same nudron-dashboard host — no separate URL to
+configure per site.
+
 ## 💬 Resident ↔ admin chat
 
 Each flat has one conversation thread, reachable from the resident dashboard
