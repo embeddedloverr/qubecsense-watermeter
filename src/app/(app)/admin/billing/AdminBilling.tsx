@@ -148,6 +148,42 @@ function sumByLocation(meters: Meter[], location: string) {
 
 /* -------------------------------- CSV / PDF ---------------------------------- */
 
+/** One row per FLAT — the whole bill (consumption, slab breakdown, fixed
+ *  charge, total) on one line, for spreadsheet work: sorting, filtering, a
+ *  pivot table, importing into an accounting tool. The per-meter totalizer
+ *  detail lives in the Detailed CSV instead — this one is meant to open
+ *  cleanly with exactly as many rows as there are flats. */
+function buildFlatCsv(report: Report): string {
+  const header = [
+    "Flat",
+    "Owner",
+    "Phone",
+    "Consumption (L)",
+    "Complete",
+    "Anomalies",
+    ...report.tariff.slabs.map((_, i) => `Slab ${i + 1} (₹)`),
+    "Fixed charge (₹)",
+    "Amount (₹)",
+  ];
+  const rows = report.rows.map((r) => [
+    r.flat,
+    r.ownerName,
+    r.ownerPhone,
+    hasReading(r.meters) ? r.litres : "",
+    r.complete ? "Yes" : "No",
+    r.meters
+      .filter((m) => m.anomaly)
+      .map((m) => `${m.location || "Meter"}: ${ANOMALY_LABEL[m.anomaly!] || m.anomaly}`)
+      .join("; "),
+    ...report.tariff.slabs.map((_, i) => (r.breakdown[i]?.amount ?? 0).toFixed(2)),
+    r.fixedCharge.toFixed(2),
+    r.amount.toFixed(2),
+  ]);
+  return [header, ...rows]
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+}
+
 /** One row per METER, not per flat — includes device id and the exact
  *  totalizer readings the bill was computed from, so the export can stand in
  *  for an audit trail, not just a total. */
@@ -557,6 +593,14 @@ export function AdminBilling() {
     generate();
   }, [generate]);
 
+  const exportFlatCsv = () => {
+    if (!report) return;
+    const blob = new Blob([buildFlatCsv(report)], {
+      type: "text/csv;charset=utf-8;",
+    });
+    download(blob, `qubecsense-bills-${periodStamp(report)}.csv`);
+  };
+
   const exportDetailedCsv = () => {
     if (!report) return;
     const blob = new Blob([buildDetailedCsv(report)], {
@@ -649,10 +693,18 @@ export function AdminBilling() {
             <Button
               variant="outline"
               size="md"
+              onClick={exportFlatCsv}
+              disabled={!report}
+            >
+              Flat-wise CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
               onClick={exportDetailedCsv}
               disabled={!report}
             >
-              Detailed CSV
+              Meter-wise CSV
             </Button>
             <Button
               variant="outline"

@@ -224,13 +224,19 @@ meters have data.
   through 25 Jul inclusive (a cycle "start day" always closes the day *before*
   its start day next month, so it can't produce that exact span).
 
-**Export** — Detailed CSV (one row per **meter**, with device ID and the
-**totalizer** start/end readings and dates the bill was computed from — an
-audit trail, not just a total) and a summary **PDF** (one row per flat,
-dynamically generated so the PDF library never loads unless you export). A
-flat with no reading in the period shows "No data" rather than a
-fabricated "0 L" — its fixed charge still applies, but the figure isn't
-presented as a real measurement it isn't.
+**Export** — three formats, pick whichever shape the task needs:
+- **Flat-wise CSV** — one row per **flat**: consumption, slab breakdown,
+  fixed charge, total. For spreadsheet work — sorting, filtering, a pivot
+  table, importing into accounting software.
+- **Meter-wise CSV** — one row per **meter**, with device ID and the
+  **totalizer** start/end readings and dates the bill was computed from — an
+  audit trail for a specific flat's bill, not just a total.
+- **PDF** — summary report, one row per flat, dynamically generated so the
+  PDF library never loads unless you export.
+
+A flat with no reading in the period shows "No data" rather than a
+fabricated "0 L" in all three — its fixed charge still applies, but the
+figure isn't presented as a real measurement it isn't.
 
 ## 📅 Consumption (daily / monthly)
 
