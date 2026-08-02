@@ -19,6 +19,7 @@ import {
   IconChevronRight,
 } from "@/components/icons";
 import { formatDateTime } from "@/lib/utils";
+import { ANOMALY_LABEL, hasReading as hasReadingFn } from "@/lib/flatConsumptionTypes";
 
 /* --------------------------------- Types --------------------------------- */
 
@@ -61,11 +62,6 @@ interface ApiResponse {
 type Period = "daily" | "monthly" | "range";
 
 const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;
-
-const ANOMALY_LABEL: Record<string, string> = {
-  no_reading_in_period: "No reading in period",
-  totalizer_decreased: "Meter reset or replaced",
-};
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const thisMonthISO = () => new Date().toISOString().slice(0, 7);
@@ -124,7 +120,7 @@ function FlatRow({ entry, period }: { entry: FlatEntry; period: Period }) {
   // measurement. Showing "0 L" there reads as "no water used", which is wrong
   // in a way that looks exactly like the app is broken. Only show a number
   // when at least one meter actually produced one.
-  const hasReading = entry.meters.some((m) => m.consumptionLitres !== null);
+  const hasReading = hasReadingFn(entry.meters);
 
   return (
     <li>
@@ -278,9 +274,7 @@ export function AdminConsumption() {
     // Only sum flats that produced at least one real meter reading — folding
     // in flats with no baseline (consumptionLitres: 0 by construction, not by
     // measurement) would silently understate the true total.
-    const withReading = data.flats.filter((f) =>
-      f.meters.some((m) => m.consumptionLitres !== null)
-    );
+    const withReading = data.flats.filter((f) => hasReadingFn(f.meters));
     const totalLitres = withReading.reduce((a, f) => a + f.consumptionLitres, 0);
     const incomplete = data.flats.filter((f) => !f.complete).length;
     const noData = data.flats.length - withReading.length;

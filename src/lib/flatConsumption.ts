@@ -6,38 +6,25 @@
 // Site.dataApiUrl points at /api/v1/data, and these endpoints are siblings
 // on the same nudron-dashboard host, so the base is derived from that URL's
 // origin rather than asking for a second URL in the site's settings.
+//
+// Server-only (imports liveData.ts, which reaches Node's `crypto` via a
+// dynamic import). Client components must import types/ANOMALY_LABEL/
+// hasReading from ./flatConsumptionTypes instead — see that file for why.
 
 import { LiveDataError, type LiveDataCreds } from "./liveData";
+import type {
+  FlatConsumptionEntry,
+  FlatDailyEntry,
+  FlatMonthlyEntry,
+} from "./flatConsumptionTypes";
 
-export interface FlatConsumptionMeter {
-  deviceId: string;
-  deviceKey: string;
-  location: string | null;
-  totalizerStart: number | null;
-  totalizerStartDate: string | null;
-  totalizerEnd: number | null;
-  totalizerEndDate: string | null;
-  consumptionLitres: number | null;
-  /** "no_reading_in_period" | "totalizer_decreased" | null */
-  anomaly: string | null;
-}
-
-export interface FlatConsumptionEntry {
-  flat: string;
-  consumptionLitres: number;
-  complete: boolean;
-  meters: FlatConsumptionMeter[];
-  computedAt: string;
-}
-
-export interface FlatDailyEntry extends FlatConsumptionEntry {
-  date: string;
-}
-export interface FlatMonthlyEntry extends FlatConsumptionEntry {
-  month: string;
-  isPartialMonth: boolean;
-  latestDateUsed: string;
-}
+export type {
+  FlatConsumptionMeter,
+  FlatConsumptionEntry,
+  FlatDailyEntry,
+  FlatMonthlyEntry,
+} from "./flatConsumptionTypes";
+export { ANOMALY_LABEL, hasReading } from "./flatConsumptionTypes";
 
 function originOf(baseUrl: string): string {
   try {

@@ -12,9 +12,17 @@ import {
   Spinner,
   Label,
 } from "@/components/ui";
-import { IconX, IconAlert, IconDroplet, IconRupee, IconHome, IconCalendar } from "@/components/icons";
+import {
+  IconX,
+  IconAlert,
+  IconDroplet,
+  IconRupee,
+  IconHome,
+  IconCalendar,
+} from "@/components/icons";
 import { useToast } from "@/components/Toast";
 import { formatDate } from "@/lib/utils";
+import { ANOMALY_LABEL, hasReading } from "@/lib/flatConsumptionTypes";
 
 /* ----------------------------------- Types ---------------------------------- */
 
@@ -29,24 +37,39 @@ interface SlabCharge {
   amount: number;
 }
 
+interface Meter {
+  deviceId: string;
+  deviceKey: string;
+  location: string | null;
+  totalizerStart: number | null;
+  totalizerStartDate: string | null;
+  totalizerEnd: number | null;
+  totalizerEndDate: string | null;
+  consumptionLitres: number | null;
+  anomaly: "no_reading_in_period" | "totalizer_decreased" | null;
+}
+
 interface BillRow {
   flat: string;
   ownerName: string;
   ownerPhone: string;
   litres: number;
-  meters: { deviceId: string; location: string | null; litres: number }[];
+  complete: boolean;
+  meters: Meter[];
   breakdown: SlabCharge[];
   fixedCharge: number;
   amount: number;
 }
 
 interface Report {
-  month: string;
-  cycle: { from: string; to: string; startDay: number };
+  period: "cycle" | "range";
+  month: string | null;
+  from: string;
+  to: string;
+  cycle: { from: string; to: string; startDay: number } | null;
   project: string | null;
   building: string | null;
   generatedAt: string;
-  coverage: { from: string | null; to: string | null; days: number };
   tariff: {
     slabs: Slab[];
     fixedCharge: number;
@@ -55,9 +78,13 @@ interface Report {
   };
   flatCount: number;
   totalLitres: number;
+  totalLitresExcluded: number;
   totalAmount: number;
+  incompleteCount: number;
   rows: BillRow[];
 }
+
+type Period = "cycle" | "range";
 
 /* --------------------------------- Helpers ---------------------------------- */
 
@@ -75,6 +102,179 @@ function monthLabel(m: string): string {
     month: "long",
     year: "numeric",
   });
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const daysAgoISO = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+
+/** Human label for whatever period a report covers — a plain range for a
+ *  custom export, the month plus its exact cycle dates when the tariff uses
+ *  a non-calendar cycle, or just the month name for the ordinary case. */
+function periodLabel(report: Report): string {
+  if (report.period === "range" || !report.month) {
+    return `${formatDate(report.from)} – ${formatDate(report.to)}`;
+  }
+  const base = monthLabel(report.month);
+  return report.cycle && report.cycle.startDay > 1
+    ? `${base} (${formatDate(report.cycle.from)} – ${formatDate(report.cycle.to)})`
+    : base;
+}
+
+/** Filename-safe stamp for exports. */
+function periodStamp(report: Report): string {
+  return report.period === "cycle" && report.month
+    ? report.month
+    : `${report.from}_to_${report.to}`;
+}
+
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function sumByLocation(meters: Meter[], location: string) {
+  return meters
+    .filter((m) => (m.location || "").toLowerCase() === location)
+    .reduce((a, m) => a + (m.consumptionLitres || 0), 0);
+}
+
+/* -------------------------------- CSV / PDF ---------------------------------- */
+
+/** One row per METER, not per flat — includes device id and the exact
+ *  totalizer readings the bill was computed from, so the export can stand in
+ *  for an audit trail, not just a total. */
+function buildDetailedCsv(report: Report): string {
+  const header = [
+    "Flat",
+    "Owner",
+    "Phone",
+    "Meter location",
+    "Device ID",
+    "Totalizer start",
+    "Totalizer start date",
+    "Totalizer end",
+    "Totalizer end date",
+    "Consumption (L)",
+    "Anomaly",
+    "Complete",
+    "Fixed charge (₹)",
+    "Amount (₹)",
+  ];
+  const rows: (string | number)[][] = [];
+  for (const r of report.rows) {
+    const meters = r.meters.length ? r.meters : [null];
+    for (const m of meters) {
+      rows.push([
+        r.flat,
+        r.ownerName,
+        r.ownerPhone,
+        m?.location || "",
+        m?.deviceId || "",
+        m?.totalizerStart ?? "",
+        m?.totalizerStartDate || "",
+        m?.totalizerEnd ?? "",
+        m?.totalizerEndDate || "",
+        m?.consumptionLitres ?? "",
+        m?.anomaly ? ANOMALY_LABEL[m.anomaly] || m.anomaly : "",
+        r.complete ? "Yes" : "No",
+        r.fixedCharge.toFixed(2),
+        r.amount.toFixed(2),
+      ]);
+    }
+  }
+  return [header, ...rows]
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+}
+
+/** Summary PDF: one row per flat — Flat, Owner, Kitchen/Bathroom/Total
+ *  litres, Amount. Meter-level detail (device id, totalizer) belongs in the
+ *  CSV, which residents don't need but an operator auditing a bill does. */
+async function buildPdf(report: Report): Promise<Blob> {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const subtitle = [report.project, report.building].filter(Boolean).join(" · ");
+
+  doc.setFontSize(16);
+  doc.text("Water bill", 40, 46);
+  doc.setFontSize(10);
+  doc.setTextColor(110);
+  let y = 62;
+  if (subtitle) {
+    doc.text(subtitle, 40, y);
+    y += 14;
+  }
+  doc.text(periodLabel(report), 40, y);
+  y += 14;
+  doc.text(
+    `Generated ${new Date(report.generatedAt).toLocaleString("en-IN")}`,
+    40,
+    y
+  );
+
+  const body = report.rows.map((r) => [
+    r.flat,
+    r.ownerName || "—",
+    litres(sumByLocation(r.meters, "kitchen")),
+    litres(sumByLocation(r.meters, "bathroom")),
+    hasReading(r.meters) ? litres(r.litres) : "No data",
+    rupees(r.amount) + (r.complete ? "" : " *"),
+  ]);
+
+  autoTable(doc, {
+    startY: y + 16,
+    head: [["Flat", "Owner", "Kitchen (L)", "Bathroom (L)", "Total (L)", "Amount"]],
+    body,
+    foot: [
+      [
+        {
+          content: `${report.flatCount} flat(s)${
+            report.incompleteCount
+              ? ` · ${report.incompleteCount} incomplete (*)`
+              : ""
+          }`,
+          colSpan: 4,
+        } as any,
+        litres(report.totalLitres),
+        rupees(report.totalAmount),
+      ],
+    ],
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: [3, 105, 161], textColor: 255 },
+    footStyles: { fillColor: [241, 245, 249], textColor: 20, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 45 },
+      2: { halign: "right" },
+      3: { halign: "right" },
+      4: { halign: "right" },
+      5: { halign: "right" },
+    },
+    didDrawPage: () => {
+      const page = doc.getNumberOfPages();
+      doc.setFontSize(8);
+      doc.setTextColor(140);
+      doc.text(
+        `QubecSense · page ${page}`,
+        doc.internal.pageSize.getWidth() - 40,
+        doc.internal.pageSize.getHeight() - 20,
+        { align: "right" }
+      );
+    },
+  });
+
+  return doc.output("blob");
 }
 
 /* ------------------------------- Tariff editor ------------------------------- */
@@ -275,9 +475,10 @@ function TariffEditor({
           <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <IconCalendar className="h-3.5 w-3.5 shrink-0" />
             e.g. &ldquo;August&rdquo; would cover{" "}
-            {billingCyclePreview(cycleDay)}. Applies the next time you save,
-            and to reports you generate afterward — bills already
-            generated don&apos;t change.
+            {billingCyclePreview(cycleDay)}. Applies to reports generated with
+            the &ldquo;Cycle&rdquo; period below — the custom
+            &ldquo;Range&rdquo; option always uses the exact dates you pick,
+            regardless of this setting.
           </p>
         </div>
       </CardContent>
@@ -309,18 +510,36 @@ function billingCyclePreview(cycleDayStr: string): string {
 /* ------------------------------ Main component ------------------------------- */
 
 export function AdminBilling() {
+  const { toast } = useToast();
+  const [period, setPeriod] = React.useState<Period>("cycle");
   const [month, setMonth] = React.useState(currentMonth());
+  const [from, setFrom] = React.useState(daysAgoISO(29));
+  const [to, setTo] = React.useState(todayISO());
+  const [rangeError, setRangeError] = React.useState<string | null>(null);
   const [report, setReport] = React.useState<Report | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [active, setActive] = React.useState<BillRow | null>(null);
   const [tariffConfigured, setTariffConfigured] = React.useState(true);
+  const [exportingPdf, setExportingPdf] = React.useState(false);
 
   const generate = React.useCallback(async () => {
+    if (period === "range") {
+      if (!from || !to) return;
+      if (from > to) {
+        setRangeError("The start date must be on or before the end date.");
+        return;
+      }
+    }
+    setRangeError(null);
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/billing/report?month=${month}`, {
+      const qs =
+        period === "range"
+          ? `period=range&from=${from}&to=${to}`
+          : `period=cycle&month=${month}`;
+      const res = await fetch(`/api/billing/report?${qs}`, {
         cache: "no-store",
       });
       const data = await res.json();
@@ -332,45 +551,37 @@ export function AdminBilling() {
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, [period, month, from, to]);
 
   React.useEffect(() => {
     generate();
   }, [generate]);
 
-  const exportCsv = () => {
+  const exportDetailedCsv = () => {
     if (!report) return;
-    const header = [
-      "Flat",
-      "Owner",
-      "Phone",
-      "Consumption (L)",
-      ...report.tariff.slabs.map((_, i) => `Slab ${i + 1} (₹)`),
-      "Fixed charge (₹)",
-      "Amount (₹)",
-    ];
-    const rows = report.rows.map((r) => [
-      r.flat,
-      r.ownerName,
-      r.ownerPhone,
-      r.litres,
-      ...report.tariff.slabs.map((_, i) =>
-        (r.breakdown[i]?.amount ?? 0).toFixed(2)
-      ),
-      r.fixedCharge.toFixed(2),
-      r.amount.toFixed(2),
-    ]);
-    const csv = [header, ...rows]
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `qubecsense-bills-${report.month}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([buildDetailedCsv(report)], {
+      type: "text/csv;charset=utf-8;",
+    });
+    download(blob, `qubecsense-bills-detailed-${periodStamp(report)}.csv`);
   };
+
+  const exportPdf = async () => {
+    if (!report) return;
+    setExportingPdf(true);
+    try {
+      const blob = await buildPdf(report);
+      download(blob, `qubecsense-bills-${periodStamp(report)}.pdf`);
+    } catch {
+      toast("Could not build the PDF. Please try again.", "error");
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const allNoData =
+    report != null &&
+    report.rows.length > 0 &&
+    report.totalLitresExcluded === report.rows.length;
 
   return (
     <div className="space-y-4">
@@ -382,29 +593,95 @@ export function AdminBilling() {
       />
 
       {/* Report controls */}
-      <div className="flex flex-wrap items-center gap-3 print:hidden">
-        <Input
-          type="month"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="w-auto"
-          aria-label="Billing month"
-        />
-        <Button variant="outline" size="md" onClick={generate} loading={loading}>
-          Refresh report
-        </Button>
-        <Button variant="outline" size="md" onClick={exportCsv} disabled={!report}>
-          Export CSV
-        </Button>
-        <Button
-          variant="outline"
-          size="md"
-          onClick={() => window.print()}
-          disabled={!report}
-        >
-          Print
-        </Button>
-      </div>
+      <Card className="print:hidden">
+        <CardContent className="flex flex-wrap items-end gap-3 pt-5">
+          <div className="inline-flex rounded-lg border border-border p-0.5">
+            {(["cycle", "range"] as Period[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`rounded-md px-3.5 py-1.5 text-sm font-medium capitalize transition-colors ${
+                  period === p
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          {period === "cycle" ? (
+            <Input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-auto"
+              aria-label="Billing month"
+            />
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                value={from}
+                max={to || todayISO()}
+                onChange={(e) => setFrom(e.target.value)}
+                className="w-auto"
+                aria-label="From date"
+              />
+              <span className="text-sm text-muted-foreground">to</span>
+              <Input
+                type="date"
+                value={to}
+                min={from || undefined}
+                max={todayISO()}
+                onChange={(e) => setTo(e.target.value)}
+                className="w-auto"
+                aria-label="To date"
+              />
+            </div>
+          )}
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="md" onClick={generate} loading={loading}>
+              Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={exportDetailedCsv}
+              disabled={!report}
+            >
+              Detailed CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={exportPdf}
+              loading={exportingPdf}
+              disabled={!report}
+            >
+              PDF
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => window.print()}
+              disabled={!report}
+            >
+              Print
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {rangeError && (
+        <Card className="print:hidden">
+          <CardContent className="py-4 text-center text-sm text-destructive">
+            {rangeError}
+          </CardContent>
+        </Card>
+      )}
 
       {!tariffConfigured && (
         <Card className="border-warning/50 print:hidden">
@@ -437,41 +714,37 @@ export function AdminBilling() {
           {/* Print header */}
           <div className="hidden print:block">
             <h2 className="text-lg font-bold">
-              Water bill — {monthLabel(report.month)}
+              Water bill — {periodLabel(report)}
             </h2>
             <p className="text-sm">
               {[report.project, report.building].filter(Boolean).join(" · ")}
             </p>
-            {report.cycle.startDay > 1 && (
-              <p className="text-sm">
-                Billing cycle: {formatDate(report.cycle.from)} –{" "}
-                {formatDate(report.cycle.to)}
-              </p>
-            )}
           </div>
 
           {/* Meta */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">
-              {monthLabel(report.month)}
+              {periodLabel(report)}
             </span>
-            {report.cycle.startDay > 1 && (
-              <span>
-                Cycle: {formatDate(report.cycle.from)} → {formatDate(report.cycle.to)}
-              </span>
-            )}
-            {report.coverage.days > 0 ? (
-              <span>
-                Data: {report.coverage.from} → {report.coverage.to} (
-                {report.coverage.days} day{report.coverage.days === 1 ? "" : "s"})
-              </span>
-            ) : (
-              <span>No readings in this month yet.</span>
-            )}
           </div>
 
+          {/* All-flats-no-data banner — the case that most looks like a
+              broken report: a period before any meter had a baseline
+              reading legitimately returns zero usable readings for
+              everyone. */}
+          {allNoData && (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-sm text-warning print:hidden">
+              <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                No meter had a reading at the start of this period — usually
+                because installation happened partway through it. Amounts
+                below are fixed charges only. Try a more recent period.
+              </span>
+            </div>
+          )}
+
           {/* KPIs */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 print:hidden">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 print:hidden">
             <KpiCard
               label="Flats billed"
               value={String(report.flatCount)}
@@ -480,7 +753,19 @@ export function AdminBilling() {
             <KpiCard
               label="Consumption"
               value={litres(report.totalLitres)}
+              sub={
+                report.totalLitresExcluded > 0
+                  ? `${report.totalLitresExcluded} excluded — no data`
+                  : undefined
+              }
               icon={IconDroplet}
+            />
+            <KpiCard
+              label="Incomplete"
+              value={String(report.incompleteCount)}
+              sub="Missing a reading in period"
+              icon={IconAlert}
+              tone={report.incompleteCount > 0 ? "warning" : undefined}
             />
             <KpiCard
               label="Total billed"
@@ -502,7 +787,7 @@ export function AdminBilling() {
           {report.rows.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No consumption recorded for this month.
+                No flats to bill for this period.
               </CardContent>
             </Card>
           ) : (
@@ -520,29 +805,43 @@ export function AdminBilling() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {report.rows.map((r) => (
-                      <tr key={r.flat} className="hover:bg-muted/40">
-                        <td className="tabular px-5 py-3 font-semibold">{r.flat}</td>
-                        <td className="px-5 py-3 text-muted-foreground">
-                          {r.ownerName || "—"}
-                        </td>
-                        <td className="tabular px-5 py-3 text-muted-foreground">
-                          {litres(r.litres)}
-                        </td>
-                        <td className="tabular px-5 py-3 font-medium text-foreground">
-                          {rupees(r.amount)}
-                        </td>
-                        <td className="px-5 py-3 text-right print:hidden">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setActive(r)}
+                    {report.rows.map((r) => {
+                      const got = hasReading(r.meters);
+                      return (
+                        <tr key={r.flat} className="hover:bg-muted/40">
+                          <td className="tabular px-5 py-3 font-semibold">
+                            <div className="flex items-center gap-1.5">
+                              {r.flat}
+                              {!r.complete && (
+                                <Badge tone="warning">Incomplete</Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-muted-foreground">
+                            {r.ownerName || "—"}
+                          </td>
+                          <td
+                            className={`tabular px-5 py-3 ${
+                              got ? "text-muted-foreground" : "text-muted-foreground/60"
+                            }`}
                           >
-                            Bill
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                            {got ? litres(r.litres) : "No data"}
+                          </td>
+                          <td className="tabular px-5 py-3 font-medium text-foreground">
+                            {rupees(r.amount)}
+                          </td>
+                          <td className="px-5 py-3 text-right print:hidden">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setActive(r)}
+                            >
+                              Bill
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-border bg-muted/40 font-semibold">
@@ -558,26 +857,35 @@ export function AdminBilling() {
 
               {/* Mobile list */}
               <ul className="divide-y divide-border md:hidden print:hidden">
-                {report.rows.map((r) => (
-                  <li key={r.flat}>
-                    <button
-                      onClick={() => setActive(r)}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40"
-                    >
-                      <div className="min-w-0">
-                        <p className="tabular font-semibold text-foreground">
-                          Flat {r.flat}
-                        </p>
-                        <p className="truncate text-sm text-muted-foreground">
-                          {r.ownerName || "—"} · {litres(r.litres)}
-                        </p>
-                      </div>
-                      <span className="tabular shrink-0 font-medium text-foreground">
-                        {rupees(r.amount)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                {report.rows.map((r) => {
+                  const got = hasReading(r.meters);
+                  return (
+                    <li key={r.flat}>
+                      <button
+                        onClick={() => setActive(r)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="tabular font-semibold text-foreground">
+                              Flat {r.flat}
+                            </p>
+                            {!r.complete && (
+                              <Badge tone="warning">Incomplete</Badge>
+                            )}
+                          </div>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {r.ownerName || "—"} ·{" "}
+                            {got ? litres(r.litres) : "No data"}
+                          </p>
+                        </div>
+                        <span className="tabular shrink-0 font-medium text-foreground">
+                          {rupees(r.amount)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
                 <li className="flex items-center justify-between px-4 py-3 font-semibold">
                   <span>Total</span>
                   <span className="tabular">{rupees(report.totalAmount)}</span>
@@ -591,8 +899,7 @@ export function AdminBilling() {
       {active && report && (
         <BillModal
           row={active}
-          month={report.month}
-          cycle={report.cycle}
+          periodText={periodLabel(report)}
           building={[report.project, report.building].filter(Boolean).join(" · ")}
           onClose={() => setActive(null)}
         />
@@ -604,24 +911,35 @@ export function AdminBilling() {
 function KpiCard({
   label,
   value,
+  sub,
   icon: Icon,
+  tone,
 }: {
   label: string;
   value: string;
+  sub?: string;
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  tone?: "warning";
 }) {
   return (
     <Card>
       <CardContent className="pt-5">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{label}</p>
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+          <span
+            className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+              tone === "warning"
+                ? "bg-warning/15 text-warning"
+                : "bg-accent text-accent-foreground"
+            }`}
+          >
             <Icon className="h-5 w-5" />
           </span>
         </div>
         <p className="tabular mt-2 text-xl font-bold text-foreground sm:text-2xl">
           {value}
         </p>
+        {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -631,14 +949,12 @@ function KpiCard({
 
 function BillModal({
   row,
-  month,
-  cycle,
+  periodText,
   building,
   onClose,
 }: {
   row: BillRow;
-  month: string;
-  cycle: { from: string; to: string; startDay: number };
+  periodText: string;
   building: string;
   onClose: () => void;
 }) {
@@ -652,24 +968,22 @@ function BillModal({
     };
   }, [onClose]);
 
+  const got = hasReading(row.meters);
   let from = 0;
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
       <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-card shadow-xl animate-fade-in sm:rounded-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-5 py-3.5">
           <div>
-            <h2 className="tabular text-lg font-bold text-foreground">
-              Flat {row.flat} · {monthLabel(month)}
+            <h2 className="tabular flex items-center gap-1.5 text-lg font-bold text-foreground">
+              Flat {row.flat}
+              {!row.complete && <Badge tone="warning">Incomplete</Badge>}
             </h2>
             <p className="text-sm text-muted-foreground">
               {row.ownerName || "—"}
               {row.ownerPhone ? ` · ${row.ownerPhone}` : ""}
             </p>
-            {cycle.startDay > 1 && (
-              <p className="text-xs text-muted-foreground">
-                {formatDate(cycle.from)} – {formatDate(cycle.to)}
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">{periodText}</p>
           </div>
           <button
             onClick={onClose}
@@ -685,24 +999,49 @@ function BillModal({
             <p className="text-xs text-muted-foreground">{building}</p>
           )}
 
-          {/* Meter split */}
+          {/* Meter split — device id + totalizer readings behind the total */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-foreground">
               Consumption
             </p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
-              {row.meters.map((m) => (
-                <li key={m.deviceId} className="flex justify-between">
-                  <span>
-                    {m.location || "Meter"}{" "}
-                    <span className="tabular text-xs">({m.deviceId})</span>
-                  </span>
-                  <span className="tabular">{litres(m.litres)}</span>
-                </li>
-              ))}
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              {row.meters.length === 0 ? (
+                <li>No meters registered.</li>
+              ) : (
+                row.meters.map((m) => (
+                  <li key={m.deviceKey} className="rounded-lg border border-border p-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-foreground">
+                        {m.location || "Meter"}{" "}
+                        <span className="tabular text-xs text-muted-foreground">
+                          ({m.deviceId})
+                        </span>
+                      </span>
+                      <span className="tabular">
+                        {m.consumptionLitres != null ? litres(m.consumptionLitres) : "—"}
+                      </span>
+                    </div>
+                    {m.anomaly ? (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-destructive">
+                        <IconAlert className="h-3 w-3" />
+                        {ANOMALY_LABEL[m.anomaly] || m.anomaly}
+                      </p>
+                    ) : (
+                      <p className="mt-1 tabular text-xs text-muted-foreground">
+                        Totalizer {m.totalizerStart ?? "—"} → {m.totalizerEnd ?? "—"}
+                        {m.totalizerStartDate && m.totalizerEndDate
+                          ? ` (${m.totalizerStartDate} → ${m.totalizerEndDate})`
+                          : ""}
+                      </p>
+                    )}
+                  </li>
+                ))
+              )}
               <li className="flex justify-between border-t border-border pt-1 font-medium text-foreground">
                 <span>Total</span>
-                <span className="tabular">{litres(row.litres)}</span>
+                <span className="tabular">
+                  {got ? litres(row.litres) : "No data"}
+                </span>
               </li>
             </ul>
           </div>

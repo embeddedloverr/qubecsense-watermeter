@@ -204,15 +204,33 @@ ones, and the script **aborts** if any real detail is still visible, so the
 guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 `guide-preview.png` of the whole document.
 
-## 🧾 Billing cycle
+## 🧾 Billing
 
-**Admin → Billing** defaults to the ordinary calendar month. To bill on a
-different cycle — e.g. the 5th of each month through the 4th of the next —
-set **Billing cycle start day** in the tariff card. Day 1 (the default) is
-unchanged behaviour; any other day shifts what "August" means when generating
-a report, without touching bills already generated. Capped at day 28 so the
-cycle length never shifts between months depending on how many days that
-month has.
+**Admin → Billing** prices consumption from meter **totalizer deltas** — the
+same authoritative source Consumption uses — rather than the intraday sums
+the live meter table shows, so a bill is never a rounding artifact of how
+packets happened to bucket through the day. This also removed the old
+92-day/3-month lookback limit: a cycle or range can reach as far back as the
+meters have data.
+
+**Period** — two ways to pick what a report covers:
+- **Cycle** — the recurring monthly bill. Defaults to the calendar month; set
+  **Billing cycle start day** in the tariff card for a different cycle, e.g.
+  the 5th of each month through the 4th of the next. Day 1 (the default) is
+  unchanged behaviour. Capped at day 28 so the cycle length never shifts
+  between months depending on how many days that month has.
+- **Range** — a one-off bill for exact dates, independent of the cycle
+  setting. Use this for anything the cycle can't express, e.g. billing 25 Jun
+  through 25 Jul inclusive (a cycle "start day" always closes the day *before*
+  its start day next month, so it can't produce that exact span).
+
+**Export** — Detailed CSV (one row per **meter**, with device ID and the
+**totalizer** start/end readings and dates the bill was computed from — an
+audit trail, not just a total) and a summary **PDF** (one row per flat,
+dynamically generated so the PDF library never loads unless you export). A
+flat with no reading in the period shows "No data" rather than a
+fabricated "0 L" — its fixed charge still applies, but the figure isn't
+presented as a real measurement it isn't.
 
 ## 📅 Consumption (daily / monthly)
 
