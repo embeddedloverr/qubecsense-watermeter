@@ -206,12 +206,18 @@ guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 
 ## 🧾 Billing
 
-**Admin → Billing** prices consumption from meter **totalizer deltas** — the
-same authoritative source Consumption uses — rather than the intraday sums
-the live meter table shows, so a bill is never a rounding artifact of how
-packets happened to bucket through the day. This also removed the old
-92-day/3-month lookback limit: a cycle or range can reach as far back as the
-meters have data.
+**Admin → Billing** prices consumption from meter **totalizer deltas** —
+nudron-dashboard's `/api/v1/flat-consumption/*` endpoints — rather than the
+intraday sums the live meter table shows, so a bill is never a rounding
+artifact of how packets happened to bucket through the day. This also
+removed the old 92-day/3-month lookback limit: a cycle or range can reach as
+far back as the meters have data.
+
+Two anomalies are called out explicitly rather than silently folded into the
+number: `no_reading_in_period` (nothing to compute from) and
+`totalizer_decreased` (almost always a meter reset or replacement, not
+negative consumption) — both mark that flat's bill `Incomplete`, and its
+consumption shows as "No data" rather than a fabricated `0 L`.
 
 **Period** — two ways to pick what a report covers:
 - **Cycle** — the recurring monthly bill. Defaults to the calendar month; set
@@ -237,24 +243,6 @@ meters have data.
 A flat with no reading in the period shows "No data" rather than a
 fabricated "0 L" in all three — its fixed charge still applies, but the
 figure isn't presented as a real measurement it isn't.
-
-## 📅 Consumption (daily / monthly)
-
-**Admin → Consumption** shows exact per-flat usage from nudron-dashboard's
-`/api/v1/flat-consumption/*` endpoints — totalizer deltas, not the intraday
-sums Live Data uses, and served from pre-computed rollups
-(`flatDailyConsumption` / `flatMonthlyConsumption`), so it stays fast
-regardless of how large the raw `readings` collection grows.
-
-Each flat can be expanded to see the per-meter totalizer readings behind the
-total, and two anomalies are called out explicitly rather than silently
-folded into the number: `no_reading_in_period` (nothing to compute from) and
-`totalizer_decreased` (almost always a meter reset or replacement, not
-negative consumption) — both mark that flat's total `incomplete`.
-
-Uses the same per-site credentials as Live Data (`resolveSiteCreds`), just
-against a sibling path on the same nudron-dashboard host — no separate URL to
-configure per site.
 
 ## 💬 Resident ↔ admin chat
 
