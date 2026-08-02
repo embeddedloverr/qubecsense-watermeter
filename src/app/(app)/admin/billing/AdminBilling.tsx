@@ -92,6 +92,16 @@ const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;
 const rupees = (n: number) =>
   `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** ₹-free amount formatter for jsPDF specifically. jsPDF's built-in fonts
+ *  (Helvetica etc.) only cover WinAnsiEncoding — the Rupee sign (U+20B9) was
+ *  added to Unicode in 2010 and isn't in that set, so it silently renders as
+ *  a tofu glyph instead of failing loudly. Embedding a Unicode font just for
+ *  one symbol isn't worth the bundle weight; "Rs." is unambiguous and part
+ *  of the standard font. Everywhere else in the app (on-screen, the CSV
+ *  exports) is plain HTML/UTF-8 text and renders ₹ correctly already. */
+const rupeesPdf = (n: number) =>
+  `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 function currentMonth(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -266,7 +276,7 @@ async function buildPdf(report: Report): Promise<Blob> {
     litres(sumByLocation(r.meters, "kitchen")),
     litres(sumByLocation(r.meters, "bathroom")),
     hasReading(r.meters) ? litres(r.litres) : "No data",
-    rupees(r.amount) + (r.complete ? "" : " *"),
+    rupeesPdf(r.amount) + (r.complete ? "" : " *"),
   ]);
 
   autoTable(doc, {
@@ -284,7 +294,7 @@ async function buildPdf(report: Report): Promise<Blob> {
           colSpan: 4,
         } as any,
         litres(report.totalLitres),
-        rupees(report.totalAmount),
+        rupeesPdf(report.totalAmount),
       ],
     ],
     styles: { fontSize: 9, cellPadding: 4 },
