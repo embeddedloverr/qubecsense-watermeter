@@ -244,6 +244,24 @@ A flat with no reading in the period shows "No data" rather than a
 fabricated "0 L" in all three — its fixed charge still applies, but the
 figure isn't presented as a real measurement it isn't.
 
+**Search** — filter by flat number or owner name. Narrows the table, its own
+footer total, and all three exports together — search "501", export, and
+the file contains just the matching flats. The KPI cards deliberately stay
+on the whole period regardless of search.
+
+**Share one flat's bill** — open a row's **Bill** modal for:
+- **Email bill** — sends the bill as a PDF attachment to the flat's saved
+  owner email, via the same `SMTP_*` config as OTP/chat email. Rebuilt
+  entirely server-side from the flat number and period (never from anything
+  the browser sends), so the emailed figure can't be tampered with in
+  transit. Disabled with an explanation when the flat has no email on file.
+- **Share PDF / Share image** — generates the bill as a file and opens the
+  device's native share sheet (Web Share API) so the admin picks WhatsApp,
+  Mail, or anything else installed, with the file already attached. Falls
+  back to a plain download on browsers/OS without share-sheet support.
+  There's no WhatsApp Business API integration here — this is the browser
+  handing off to whatever's installed, not an automated send.
+
 ## 💬 Resident ↔ admin chat
 
 Each flat has one conversation thread, reachable from the resident dashboard

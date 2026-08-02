@@ -27,6 +27,65 @@ export function billingCycleRange(
   return { from: fmt(from), to: fmt(to) };
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface BillingPeriod {
+  from: string;
+  to: string;
+  month: string | null;
+  cycle: { from: string; to: string; startDay: number } | null;
+}
+
+/**
+ * Resolve `?period=cycle&month=` or `?period=range&from=&to=` into the actual
+ * date span to bill, with the same validation both billing routes need
+ * (date shape, from<=to, not in the future). Shared so /api/billing/report
+ * and /api/billing/send can't drift on what a given request means.
+ */
+export function resolveBillingPeriod(
+  period: "cycle" | "range",
+  params: { month?: string | null; from?: string | null; to?: string | null },
+  billingCycleStartDay: number
+): { ok: true; period: BillingPeriod } | { ok: false; error: string } {
+  let from: string;
+  let to: string;
+  let month: string | null = null;
+  let cycle: BillingPeriod["cycle"] = null;
+
+  if (period === "range") {
+    from = params.from || "";
+    to = params.to || "";
+    if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
+      return { ok: false, error: "Pass ?from= and ?to= as YYYY-MM-DD." };
+    }
+    if (from > to) {
+      return { ok: false, error: "from must be on or before to" };
+    }
+  } else {
+    month = params.month || "";
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return { ok: false, error: "Pass ?month=YYYY-MM." };
+    }
+    const range = billingCycleRange(month, billingCycleStartDay);
+    from = range.from;
+    to = range.to;
+    cycle = { from, to, startDay: billingCycleStartDay };
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (from > todayStr) {
+    return {
+      ok: false,
+      error:
+        period === "range"
+          ? "That range is in the future."
+          : "That billing cycle is in the future.",
+    };
+  }
+
+  return { ok: true, period: { from, to, month, cycle } };
+}
+
 export interface Slab {
   limitLitres: number | null;
   ratePerKl: number;

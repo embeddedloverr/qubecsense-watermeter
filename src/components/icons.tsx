@@ -167,3 +167,19 @@ export const IconMessage = (p: IconProps) => (
     <path d="M8 9h8M8 12h5" />
   </svg>
 );
+
+export const IconShare = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="18" cy="5" r="2.5" />
+    <circle cx="6" cy="12" r="2.5" />
+    <circle cx="18" cy="19" r="2.5" />
+    <path d="M8.3 10.7 15.7 6.3M8.3 13.3 15.7 17.7" />
+  </svg>
+);
+
+export const IconMail = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3 7 9 6 9-6" />
+  </svg>
+);

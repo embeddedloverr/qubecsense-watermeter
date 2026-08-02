@@ -19,10 +19,13 @@ import {
   IconRupee,
   IconHome,
   IconCalendar,
+  IconShare,
+  IconMail,
 } from "@/components/icons";
 import { useToast } from "@/components/Toast";
 import { formatDate } from "@/lib/utils";
 import { ANOMALY_LABEL, hasReading } from "@/lib/flatConsumptionTypes";
+import { renderBillPdf, renderBillImage, type BillPdfData } from "@/lib/billPdf";
 
 /* ----------------------------------- Types ---------------------------------- */
 
@@ -53,6 +56,7 @@ interface BillRow {
   flat: string;
   ownerName: string;
   ownerPhone: string;
+  ownerEmail: string;
   litres: number;
   complete: boolean;
   meters: Meter[];
@@ -1019,7 +1023,13 @@ export function AdminBilling() {
         <BillModal
           row={active}
           periodText={periodLabel(report)}
-          building={[report.project, report.building].filter(Boolean).join(" · ")}
+          project={report.project}
+          building={report.building}
+          sendPayload={
+            period === "range"
+              ? { period: "range", from, to }
+              : { period: "cycle", month }
+          }
           onClose={() => setActive(null)}
         />
       )}
@@ -1066,17 +1076,49 @@ function KpiCard({
 
 /* -------------------------------- Bill modal --------------------------------- */
 
+type SendPayload =
+  | { period: "cycle"; month: string | null }
+  | { period: "range"; from: string; to: string };
+
+/** Web Share API with files, when the browser/OS supports it (Windows 11 +
+ *  Chrome/Edge does — that's the share sheet, letting the admin pick
+ *  WhatsApp or anything else installed, with the file attached). Falls back
+ *  to a plain download so the feature still works everywhere, just without
+ *  the one-tap hand-off. */
+async function shareOrDownloadFile(file: File, title: string, text: string) {
+  const nav = navigator as any;
+  if (nav.share && nav.canShare && nav.canShare({ files: [file] })) {
+    await nav.share({ files: [file], title, text });
+    return "shared" as const;
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.name;
+  a.click();
+  URL.revokeObjectURL(url);
+  return "downloaded" as const;
+}
+
 function BillModal({
   row,
   periodText,
+  project,
   building,
+  sendPayload,
   onClose,
 }: {
   row: BillRow;
   periodText: string;
-  building: string;
+  project: string | null;
+  building: string | null;
+  sendPayload: SendPayload;
   onClose: () => void;
 }) {
+  const { toast } = useToast();
+  const [sharing, setSharing] = React.useState<"pdf" | "image" | null>(null);
+  const [emailing, setEmailing] = React.useState(false);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
@@ -1089,6 +1131,92 @@ function BillModal({
 
   const got = hasReading(row.meters);
   let from = 0;
+
+  const pdfData = (): BillPdfData => ({
+    flat: row.flat,
+    ownerName: row.ownerName,
+    ownerPhone: row.ownerPhone,
+    project,
+    building,
+    periodLabel: periodText,
+    meters: row.meters,
+    litres: row.litres,
+    complete: row.complete,
+    breakdown: row.breakdown,
+    fixedCharge: row.fixedCharge,
+    amount: row.amount,
+    generatedAt: new Date().toISOString(),
+  });
+
+  const shareTitle = `Water bill — Flat ${row.flat}`;
+  const shareText = `Flat ${row.flat} · ${periodText} · ${rupees(row.amount)}`;
+
+  const shareAsPdf = async () => {
+    setSharing("pdf");
+    try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      renderBillPdf(doc, autoTable, pdfData());
+      const blob = doc.output("blob") as Blob;
+      const file = new File([blob], `qubecsense-bill-flat-${row.flat}.pdf`, {
+        type: "application/pdf",
+      });
+      const result = await shareOrDownloadFile(file, shareTitle, shareText);
+      if (result === "downloaded") {
+        toast("Sharing isn't available here — downloaded instead.", "success");
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        toast("Could not build the PDF. Please try again.", "error");
+      }
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const shareAsImage = async () => {
+    setSharing("image");
+    try {
+      const blob = await renderBillImage(pdfData());
+      const file = new File([blob], `qubecsense-bill-flat-${row.flat}.png`, {
+        type: "image/png",
+      });
+      const result = await shareOrDownloadFile(file, shareTitle, shareText);
+      if (result === "downloaded") {
+        toast("Sharing isn't available here — downloaded instead.", "success");
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        toast("Could not build the image. Please try again.", "error");
+      }
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const emailBill = async () => {
+    setEmailing(true);
+    try {
+      const res = await fetch("/api/billing/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flat: row.flat, ...sendPayload }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || "Could not send the bill.", "error");
+        return;
+      }
+      toast(`Bill emailed to ${data.sentTo}.`, "success");
+    } catch {
+      toast("Network error. Please try again.", "error");
+    } finally {
+      setEmailing(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
       <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-card shadow-xl animate-fade-in sm:rounded-2xl">
@@ -1114,8 +1242,10 @@ function BillModal({
         </div>
 
         <div className="space-y-4 p-5">
-          {building && (
-            <p className="text-xs text-muted-foreground">{building}</p>
+          {(project || building) && (
+            <p className="text-xs text-muted-foreground">
+              {[project, building].filter(Boolean).join(" · ")}
+            </p>
           )}
 
           {/* Meter split — device id + totalizer readings behind the total */}
@@ -1204,6 +1334,45 @@ function BillModal({
             <Badge tone="primary">
               <IconRupee className="h-3.5 w-3.5" /> {rupees(row.amount)}
             </Badge>
+          </div>
+
+          {/* Share / email */}
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-sm font-medium text-foreground">Share this bill</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={shareAsPdf}
+                loading={sharing === "pdf"}
+                disabled={sharing !== null}
+              >
+                <IconShare className="h-4 w-4" /> Share PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={shareAsImage}
+                loading={sharing === "image"}
+                disabled={sharing !== null}
+              >
+                <IconShare className="h-4 w-4" /> Share image
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={emailBill}
+                loading={emailing}
+                disabled={!row.ownerEmail || emailing}
+              >
+                <IconMail className="h-4 w-4" /> Email bill
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {row.ownerEmail
+                ? `Email sends to ${row.ownerEmail}. Share opens your device's share sheet — pick WhatsApp or any app.`
+                : "No email on file for this flat — add one on the Residents page to enable emailing."}
+            </p>
           </div>
         </div>
       </div>

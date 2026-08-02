@@ -3,14 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { guard } from "@/lib/guard";
-import { applySlabs, billingCycleRange, type Slab } from "@/lib/billing";
+import { applySlabs, resolveBillingPeriod, type Slab } from "@/lib/billing";
 import { LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 import { fetchFlatRange, hasReading } from "@/lib/flatConsumption";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // GET /api/billing/report?period=cycle&month=YYYY-MM
 //   Recurring bill for a "billing month", resolved through the tariff's
@@ -45,52 +43,19 @@ export async function GET(req: NextRequest) {
     const billingCycleStartDay: number =
       (tariffDoc as any)?.billingCycleStartDay || 1;
 
-    let from: string;
-    let to: string;
-    let month: string | null = null;
-    let cycle: { from: string; to: string; startDay: number } | null = null;
-
-    if (period === "range") {
-      from = req.nextUrl.searchParams.get("from") || "";
-      to = req.nextUrl.searchParams.get("to") || "";
-      if (!DATE_RE.test(from) || !DATE_RE.test(to)) {
-        return NextResponse.json(
-          { error: "Pass ?from= and ?to= as YYYY-MM-DD." },
-          { status: 400 }
-        );
-      }
-      if (from > to) {
-        return NextResponse.json(
-          { error: "from must be on or before to" },
-          { status: 400 }
-        );
-      }
-    } else {
-      month = req.nextUrl.searchParams.get("month") || "";
-      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-        return NextResponse.json(
-          { error: "Pass ?month=YYYY-MM." },
-          { status: 400 }
-        );
-      }
-      const range = billingCycleRange(month, billingCycleStartDay);
-      from = range.from;
-      to = range.to;
-      cycle = { from, to, startDay: billingCycleStartDay };
+    const resolved = resolveBillingPeriod(
+      period,
+      {
+        month: req.nextUrl.searchParams.get("month"),
+        from: req.nextUrl.searchParams.get("from"),
+        to: req.nextUrl.searchParams.get("to"),
+      },
+      billingCycleStartDay
+    );
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
-
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (from > todayStr) {
-      return NextResponse.json(
-        {
-          error:
-            period === "range"
-              ? "That range is in the future."
-              : "That billing cycle is in the future.",
-        },
-        { status: 400 }
-      );
-    }
+    const { from, to, month, cycle } = resolved.period;
 
     const creds = await resolveSiteCreds(g.ctx.siteId);
     const consumption = await fetchFlatRange({ from, to }, creds);
@@ -114,6 +79,7 @@ export async function GET(req: NextRequest) {
         flat: f.flat,
         ownerName: owner?.ownerName || "",
         ownerPhone: owner?.ownerPhone || "",
+        ownerEmail: owner?.ownerEmail || "",
         litres: f.consumptionLitres,
         complete: f.complete,
         meters: f.meters,
