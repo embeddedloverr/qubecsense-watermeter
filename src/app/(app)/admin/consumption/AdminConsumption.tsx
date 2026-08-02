@@ -109,6 +109,13 @@ function StatCard({
 function FlatRow({ entry, period }: { entry: FlatEntry; period: Period }) {
   const [open, setOpen] = React.useState(false);
   const anomalies = entry.meters.filter((m) => m.anomaly);
+  // `complete: false` means the total below isn't a real reading — most often
+  // no meter had a totalizer value AT the period's baseline (installed partway
+  // through), so every delta is null and the sum is 0 by construction, not by
+  // measurement. Showing "0 L" there reads as "no water used", which is wrong
+  // in a way that looks exactly like the app is broken. Only show a number
+  // when at least one meter actually produced one.
+  const hasReading = entry.meters.some((m) => m.consumptionLitres !== null);
 
   return (
     <li>
@@ -133,8 +140,12 @@ function FlatRow({ entry, period }: { entry: FlatEntry; period: Period }) {
             {entry.ownerName || "—"}
           </p>
         </div>
-        <p className="tabular shrink-0 text-sm font-semibold text-foreground">
-          {litres(entry.consumptionLitres)}
+        <p
+          className={`tabular shrink-0 text-sm font-semibold ${
+            hasReading ? "text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          {hasReading ? litres(entry.consumptionLitres) : "No data"}
         </p>
         <IconChevronRight
           className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
@@ -240,13 +251,32 @@ export function AdminConsumption() {
 
   const kpis = React.useMemo(() => {
     if (!data) return null;
-    const totalLitres = data.flats.reduce((a, f) => a + f.consumptionLitres, 0);
-    const incomplete = data.flats.filter((f) => !f.complete).length;
-    const anomalies = data.flats.reduce(
-      (a, f) => a + f.meters.filter((m) => m.anomaly).length,
-      0
+    // Only sum flats that produced at least one real meter reading — folding
+    // in flats with no baseline (consumptionLitres: 0 by construction, not by
+    // measurement) would silently understate the true total.
+    const withReading = data.flats.filter((f) =>
+      f.meters.some((m) => m.consumptionLitres !== null)
     );
-    return { totalLitres, incomplete, anomalies };
+    const totalLitres = withReading.reduce((a, f) => a + f.consumptionLitres, 0);
+    const incomplete = data.flats.filter((f) => !f.complete).length;
+    const noData = data.flats.length - withReading.length;
+
+    const anomalyCounts = new Map<string, number>();
+    for (const f of data.flats) {
+      for (const m of f.meters) {
+        if (m.anomaly) anomalyCounts.set(m.anomaly, (anomalyCounts.get(m.anomaly) || 0) + 1);
+      }
+    }
+    const anomalies = [...anomalyCounts.values()].reduce((a, b) => a + b, 0);
+    // Name whichever reason is actually dominant rather than assuming one —
+    // "no reading in period" (not yet installed / mid-period baseline) and
+    // "meter reset" mean very different things and shouldn't be conflated.
+    const topAnomaly = [...anomalyCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const anomalySub = topAnomaly
+      ? `Mostly: ${ANOMALY_LABEL[topAnomaly[0]] || topAnomaly[0]}`
+      : "None";
+
+    return { totalLitres, incomplete, noData, anomalies, anomalySub };
   }, [data]);
 
   const exportCsv = () => {
@@ -347,6 +377,22 @@ export function AdminConsumption() {
         </div>
       ) : data ? (
         <>
+          {/* All-flats-no-data banner — the case that most looks like a broken
+              fetch: querying a period before any meter had a baseline reading
+              (e.g. a month before installation) legitimately returns zero
+              usable readings for everyone, not an error. */}
+          {kpis && data.flatCount > 0 && kpis.noData === data.flatCount && (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-sm text-warning">
+              <IconAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                No meter had a reading at the start of{" "}
+                {period === "monthly" ? "this month" : "this period"} — usually
+                because installation happened partway through it. Try a more
+                recent {period === "monthly" ? "month" : "date"}.
+              </span>
+            </div>
+          )}
+
           {/* KPIs */}
           {kpis && (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -360,7 +406,13 @@ export function AdminConsumption() {
               <StatCard
                 label="Total consumption"
                 value={litres(kpis.totalLitres)}
-                sub={period === "daily" ? "That day" : "That month"}
+                sub={
+                  kpis.noData > 0
+                    ? `${kpis.noData} flat(s) excluded — no data`
+                    : period === "daily"
+                      ? "That day"
+                      : "That month"
+                }
                 icon={IconDroplet}
                 tone="success"
               />
@@ -374,7 +426,7 @@ export function AdminConsumption() {
               <StatCard
                 label="Anomalies"
                 value={kpis.anomalies}
-                sub="Meter reset or replaced"
+                sub={kpis.anomalySub}
                 icon={IconCheckCircle}
                 tone={kpis.anomalies > 0 ? "destructive" : "neutral"}
               />
