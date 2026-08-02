@@ -1,3 +1,32 @@
+/**
+ * Resolve a "billing month" + cycle start day into the actual [from, to]
+ * calendar dates the bill covers (both inclusive, YYYY-MM-DD).
+ *
+ * `startDay` names the day of the month a cycle OPENS. Day 1 is the ordinary
+ * calendar month — the default, and what every existing tariff already has.
+ * Any other day D means "August"'s cycle runs from Aug D through (D-1) of
+ * September: the label still names the month the cycle starts in, matching
+ * how a society talks about "August's bill" even though it closes in
+ * September.
+ *
+ * Capped at day 28 (not enforced here, but by callers/validation) so every
+ * month — including February — has that day, and a cycle's length never
+ * silently shifts between months.
+ */
+export function billingCycleRange(
+  month: string,
+  startDay: number
+): { from: string; to: string } {
+  const [y, m] = month.split("-").map(Number); // m is 1-indexed
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const from = new Date(Date.UTC(y, m - 1, startDay));
+  const to =
+    startDay === 1
+      ? new Date(Date.UTC(y, m, 0)) // last day of this same month
+      : new Date(Date.UTC(y, m, startDay - 1)); // day before startDay, next month
+  return { from: fmt(from), to: fmt(to) };
+}
+
 export interface Slab {
   limitLitres: number | null;
   ratePerKl: number;

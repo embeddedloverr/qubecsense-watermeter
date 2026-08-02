@@ -204,6 +204,16 @@ ones, and the script **aborts** if any real detail is still visible, so the
 guide is safe to circulate. Set `GUIDE_PREVIEW=1` to also emit a
 `guide-preview.png` of the whole document.
 
+## 🧾 Billing cycle
+
+**Admin → Billing** defaults to the ordinary calendar month. To bill on a
+different cycle — e.g. the 5th of each month through the 4th of the next —
+set **Billing cycle start day** in the tariff card. Day 1 (the default) is
+unchanged behaviour; any other day shifts what "August" means when generating
+a report, without touching bills already generated. Capped at day 28 so the
+cycle length never shifts between months depending on how many days that
+month has.
+
 ## 📅 Consumption (daily / monthly)
 
 **Admin → Consumption** shows exact per-flat usage from nudron-dashboard's

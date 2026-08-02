@@ -18,8 +18,12 @@ export async function GET() {
   }).lean();
   return NextResponse.json({
     tariff: tariff
-      ? { slabs: (tariff as any).slabs, fixedCharge: (tariff as any).fixedCharge }
-      : { slabs: [], fixedCharge: 0 },
+      ? {
+          slabs: (tariff as any).slabs,
+          fixedCharge: (tariff as any).fixedCharge,
+          billingCycleStartDay: (tariff as any).billingCycleStartDay ?? 1,
+        }
+      : { slabs: [], fixedCharge: 0, billingCycleStartDay: 1 },
     configured: Boolean(tariff && (tariff as any).slabs?.length),
   });
 }
@@ -36,6 +40,10 @@ export async function PUT(req: NextRequest) {
       ratePerKl: Number(s.ratePerKl),
     }));
     const fixedCharge = Number(body.fixedCharge) || 0;
+    const billingCycleStartDay =
+      body.billingCycleStartDay === undefined || body.billingCycleStartDay === ""
+        ? 1
+        : Number(body.billingCycleStartDay);
 
     const invalid = validateSlabs(slabs);
     if (invalid) {
@@ -47,16 +55,34 @@ export async function PUT(req: NextRequest) {
         { status: 400 }
       );
     }
+    if (
+      !Number.isInteger(billingCycleStartDay) ||
+      billingCycleStartDay < 1 ||
+      billingCycleStartDay > 28
+    ) {
+      return NextResponse.json(
+        { error: "Billing cycle start day must be a whole number from 1 to 28." },
+        { status: 400 }
+      );
+    }
 
     await connectDB();
     // siteId must be in BOTH the filter and the upserted document, or an
     // upsert would create a second site-less tariff row.
     await Tariff.findOneAndUpdate(
       { key: "default", siteId: g.ctx.siteId },
-      { slabs, fixedCharge, siteId: g.ctx.siteId, key: "default" },
+      {
+        slabs,
+        fixedCharge,
+        billingCycleStartDay,
+        siteId: g.ctx.siteId,
+        key: "default",
+      },
       { upsert: true, new: true }
     );
-    return NextResponse.json({ tariff: { slabs, fixedCharge } });
+    return NextResponse.json({
+      tariff: { slabs, fixedCharge, billingCycleStartDay },
+    });
   } catch (err) {
     console.error("save tariff error", err);
     return NextResponse.json(

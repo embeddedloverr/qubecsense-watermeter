@@ -12,8 +12,9 @@ import {
   Spinner,
   Label,
 } from "@/components/ui";
-import { IconX, IconAlert, IconDroplet, IconRupee, IconHome } from "@/components/icons";
+import { IconX, IconAlert, IconDroplet, IconRupee, IconHome, IconCalendar } from "@/components/icons";
 import { useToast } from "@/components/Toast";
+import { formatDate } from "@/lib/utils";
 
 /* ----------------------------------- Types ---------------------------------- */
 
@@ -41,11 +42,17 @@ interface BillRow {
 
 interface Report {
   month: string;
+  cycle: { from: string; to: string; startDay: number };
   project: string | null;
   building: string | null;
   generatedAt: string;
   coverage: { from: string | null; to: string | null; days: number };
-  tariff: { slabs: Slab[]; fixedCharge: number; configured: boolean };
+  tariff: {
+    slabs: Slab[];
+    fixedCharge: number;
+    billingCycleStartDay: number;
+    configured: boolean;
+  };
   flatCount: number;
   totalLitres: number;
   totalAmount: number;
@@ -87,6 +94,7 @@ function TariffEditor({
   const [saving, setSaving] = React.useState(false);
   const [slabs, setSlabs] = React.useState<SlabDraft[]>([]);
   const [fixed, setFixed] = React.useState("0");
+  const [cycleDay, setCycleDay] = React.useState("1");
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -103,6 +111,7 @@ function TariffEditor({
             : [{ limit: "", rate: "" }]
         );
         setFixed(String(d.tariff?.fixedCharge ?? 0));
+        setCycleDay(String(d.tariff?.billingCycleStartDay ?? 1));
         onSaved(s, d.tariff?.fixedCharge ?? 0);
       })
       .finally(() => setLoading(false));
@@ -135,6 +144,7 @@ function TariffEditor({
           ratePerKl: Number(s.rate),
         })),
         fixedCharge: Number(fixed) || 0,
+        billingCycleStartDay: Number(cycleDay) || 1,
       };
       const res = await fetch("/api/billing/tariff", {
         method: "PUT",
@@ -240,9 +250,60 @@ function TariffEditor({
             {error}
           </p>
         )}
+
+        {/* Billing cycle */}
+        <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="w-40">
+              <Label className="text-xs">Billing cycle start day</Label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={28}
+                value={cycleDay}
+                onChange={(e) => setCycleDay(e.target.value)}
+              />
+            </div>
+            <p className="pb-2.5 text-xs text-muted-foreground">
+              {Number(cycleDay) <= 1 || !cycleDay
+                ? "Day 1 = the ordinary calendar month (default)."
+                : `A cycle runs from the ${ordinal(Number(cycleDay))} of one month
+                   to the ${ordinal(Number(cycleDay) - 1)} of the next.`}
+            </p>
+          </div>
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <IconCalendar className="h-3.5 w-3.5 shrink-0" />
+            e.g. &ldquo;August&rdquo; would cover{" "}
+            {billingCyclePreview(cycleDay)}. Applies the next time you save,
+            and to reports you generate afterward — bills already
+            generated don&apos;t change.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );
+}
+
+/** 1 → "1st", 2 → "2nd", 5 → "5th", 21 → "21st"… */
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+/** Live preview of what an example month's cycle would span, for the
+ *  currently-typed (not-yet-saved) start day. */
+function billingCyclePreview(cycleDayStr: string): string {
+  const day = Math.min(28, Math.max(1, Number(cycleDayStr) || 1));
+  const from = new Date(Date.UTC(2026, 7, day)); // an arbitrary August
+  const to =
+    day === 1
+      ? new Date(Date.UTC(2026, 8, 0))
+      : new Date(Date.UTC(2026, 8, day - 1));
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return `${fmt(from)} → ${fmt(to)}`;
 }
 
 /* ------------------------------ Main component ------------------------------- */
@@ -381,6 +442,12 @@ export function AdminBilling() {
             <p className="text-sm">
               {[report.project, report.building].filter(Boolean).join(" · ")}
             </p>
+            {report.cycle.startDay > 1 && (
+              <p className="text-sm">
+                Billing cycle: {formatDate(report.cycle.from)} –{" "}
+                {formatDate(report.cycle.to)}
+              </p>
+            )}
           </div>
 
           {/* Meta */}
@@ -388,6 +455,11 @@ export function AdminBilling() {
             <span className="font-medium text-foreground">
               {monthLabel(report.month)}
             </span>
+            {report.cycle.startDay > 1 && (
+              <span>
+                Cycle: {formatDate(report.cycle.from)} → {formatDate(report.cycle.to)}
+              </span>
+            )}
             {report.coverage.days > 0 ? (
               <span>
                 Data: {report.coverage.from} → {report.coverage.to} (
@@ -520,6 +592,7 @@ export function AdminBilling() {
         <BillModal
           row={active}
           month={report.month}
+          cycle={report.cycle}
           building={[report.project, report.building].filter(Boolean).join(" · ")}
           onClose={() => setActive(null)}
         />
@@ -559,11 +632,13 @@ function KpiCard({
 function BillModal({
   row,
   month,
+  cycle,
   building,
   onClose,
 }: {
   row: BillRow;
   month: string;
+  cycle: { from: string; to: string; startDay: number };
   building: string;
   onClose: () => void;
 }) {
@@ -590,6 +665,11 @@ function BillModal({
               {row.ownerName || "—"}
               {row.ownerPhone ? ` · ${row.ownerPhone}` : ""}
             </p>
+            {cycle.startDay > 1 && (
+              <p className="text-xs text-muted-foreground">
+                {formatDate(cycle.from)} – {formatDate(cycle.to)}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}

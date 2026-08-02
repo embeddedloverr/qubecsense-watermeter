@@ -15,6 +15,8 @@ export interface ITariff {
   slabs: ISlab[];
   /** Fixed monthly charge per flat (meter/service charge), in rupees. */
   fixedCharge: number;
+  /** Day of the month a billing cycle opens. 1 = ordinary calendar month. */
+  billingCycleStartDay: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +37,9 @@ const TariffSchema = new Schema<ITariff>(
     key: { type: String, required: true, default: "default" },
     slabs: { type: [SlabSchema], default: [] },
     fixedCharge: { type: Number, default: 0, min: 0 },
+    // Capped at 28 so every month has that day — no Feb-29 edge case shifting
+    // a cycle's length depending on which month it falls in.
+    billingCycleStartDay: { type: Number, default: 1, min: 1, max: 28 },
   },
   { timestamps: true }
 );
