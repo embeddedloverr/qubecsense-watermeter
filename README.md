@@ -252,10 +252,14 @@ usage meter — turning red past 100% once they've moved into the pricier
 slab. Hidden when the first slab has no limit (a flat per-litre tariff has
 no "allowance" to show progress against).
 
-**Search** — filter by flat number or owner name. Narrows the table, its own
-footer total, and all three exports together — search "501", export, and
-the file contains just the matching flats. The KPI cards deliberately stay
-on the whole period regardless of search.
+**Search and filter** — search by flat number or owner name, plus status
+chips: **Incomplete** and **Over allowance** (crossed into the tariff's
+second slab; hidden when the first slab has no limit). Both narrow the
+table, its own footer total, and all three exports together, and compose —
+search "1" with Incomplete active shows only incomplete flats whose number
+contains "1". The KPI cards deliberately stay on the whole period
+regardless of any filter. A chip with a zero count is disabled rather than
+offering an empty result.
 
 **Share one flat's bill** — open a row's **Bill** modal for:
 - **Email bill** — sends the bill as a PDF attachment to the flat's saved

@@ -631,6 +631,7 @@ export function AdminBilling() {
   const [tariffConfigured, setTariffConfigured] = React.useState(true);
   const [exportingPdf, setExportingPdf] = React.useState(false);
   const [query, setQuery] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<"all" | "incomplete" | "over">("all");
 
   const generate = React.useCallback(async () => {
     if (period === "range") {
@@ -666,31 +667,47 @@ export function AdminBilling() {
     generate();
   }, [generate]);
 
-  // Search narrows both the table AND the exports — "show me flat 501" should
-  // mean the CSV/PDF someone downloads next also has just flat 501, not the
-  // whole period they happened to be looking at. KPIs stay on the full
-  // report regardless, since "Total billed" should mean the whole bill run.
+  // null when the tariff's first slab has no cap (a flat per-litre rate) —
+  // there's no "allowance" to show a usage bar against in that case, and
+  // "over allowance" as a filter has nothing to mean either.
+  const firstSlabLimit = report?.tariff.slabs[0]?.limitLitres ?? null;
+  const isOverAllowance = React.useCallback(
+    (r: BillRow) =>
+      firstSlabLimit != null && hasReading(r.meters) && r.litres > firstSlabLimit,
+    [firstSlabLimit]
+  );
+
+  // Search + status narrow both the table AND the exports — "show me
+  // incomplete flats" should mean the CSV/PDF someone downloads next also
+  // has just those flats, not the whole period they happened to be looking
+  // at. KPIs stay on the full report regardless, since "Total billed" should
+  // mean the whole bill run.
   const filtered = React.useMemo(() => {
     if (!report) return [];
     const q = query.trim().toLowerCase();
-    const rows = !q
+    let rows = !q
       ? report.rows
       : report.rows.filter(
           (r) =>
             r.flat.toLowerCase().includes(q) ||
             (r.ownerName || "").toLowerCase().includes(q)
         );
+    if (statusFilter === "incomplete") {
+      rows = rows.filter((r) => !r.complete);
+    } else if (statusFilter === "over") {
+      rows = rows.filter(isOverAllowance);
+    }
     return [...rows].sort((a, b) => {
       const na = parseInt(a.flat, 10);
       const nb = parseInt(b.flat, 10);
       if (Number.isNaN(na) || Number.isNaN(nb)) return a.flat.localeCompare(b.flat);
       return na - nb;
     });
-  }, [report, query]);
+  }, [report, query, statusFilter, isOverAllowance]);
 
-  // The table's own footer sums what's actually listed — with a search
-  // active, showing the whole period's total under 2 visible rows would
-  // look like the filter did nothing.
+  // The table's own footer sums what's actually listed — with a search or
+  // status filter active, showing the whole period's total under 2 visible
+  // rows would look like the filter did nothing.
   const filteredTotals = React.useMemo(() => {
     const withReading = filtered.filter((r) => hasReading(r.meters));
     return {
@@ -699,9 +716,15 @@ export function AdminBilling() {
     };
   }, [filtered]);
 
-  // null when the tariff's first slab has no cap (a flat per-litre rate) —
-  // there's no "allowance" to show a usage bar against in that case.
-  const firstSlabLimit = report?.tariff.slabs[0]?.limitLitres ?? null;
+  // Counts for the filter chip labels, off the full report so they don't
+  // shrink as soon as a filter is applied.
+  const statusCounts = React.useMemo(() => {
+    if (!report) return { incomplete: 0, over: 0 };
+    return {
+      incomplete: report.rows.filter((r) => !r.complete).length,
+      over: report.rows.filter(isOverAllowance).length,
+    };
+  }, [report, isOverAllowance]);
 
   const exportFlatCsv = () => {
     if (!report) return;
@@ -842,6 +865,34 @@ export function AdminBilling() {
             </Button>
           </div>
         </CardContent>
+
+        {report && report.rows.length > 0 && (
+          <CardContent className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+            <StatusChip
+              label="All"
+              active={statusFilter === "all"}
+              onClick={() => setStatusFilter("all")}
+            />
+            <StatusChip
+              label={`Incomplete · ${statusCounts.incomplete}`}
+              active={statusFilter === "incomplete"}
+              onClick={() =>
+                setStatusFilter(statusFilter === "incomplete" ? "all" : "incomplete")
+              }
+              tone="warning"
+              disabled={statusCounts.incomplete === 0}
+            />
+            {firstSlabLimit != null && (
+              <StatusChip
+                label={`Over allowance · ${statusCounts.over}`}
+                active={statusFilter === "over"}
+                onClick={() => setStatusFilter(statusFilter === "over" ? "all" : "over")}
+                tone="destructive"
+                disabled={statusCounts.over === 0}
+              />
+            )}
+          </CardContent>
+        )}
       </Card>
 
       {rangeError && (
@@ -998,7 +1049,9 @@ export function AdminBilling() {
           ) : filtered.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No flats match &ldquo;{query}&rdquo;.
+                {query
+                  ? <>No flats match &ldquo;{query}&rdquo;.</>
+                  : "No flats match this filter."}
               </CardContent>
             </Card>
           ) : (
@@ -1132,6 +1185,38 @@ export function AdminBilling() {
         />
       )}
     </div>
+  );
+}
+
+function StatusChip({
+  label,
+  active,
+  onClick,
+  tone = "neutral",
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  tone?: "neutral" | "warning" | "destructive";
+  disabled?: boolean;
+}) {
+  const activeClass = {
+    neutral: "bg-primary text-primary-foreground",
+    warning: "bg-warning text-warning-foreground",
+    destructive: "bg-destructive text-destructive-foreground",
+  }[tone];
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      disabled={disabled}
+      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+        active ? activeClass : "bg-muted text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
