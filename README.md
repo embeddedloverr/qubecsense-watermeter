@@ -259,7 +259,9 @@ table, its own footer total, and all three exports together, and compose —
 search "1" with Incomplete active shows only incomplete flats whose number
 contains "1". The KPI cards deliberately stay on the whole period
 regardless of any filter. A chip with a zero count is disabled rather than
-offering an empty result.
+offering an empty result. **Sort** by flat no. (default) or highest slab
+usage % — flats with no reading, or no slab limit to rank against, sort to
+the bottom rather than landing at an arbitrary spot among real percentages.
 
 **Share one flat's bill** — open a row's **Bill** modal for:
 - **Email bill** — sends the bill as a PDF attachment to the flat's saved

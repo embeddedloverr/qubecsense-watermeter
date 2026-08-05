@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  Select,
   Badge,
   Button,
   Spinner,
@@ -632,6 +633,7 @@ export function AdminBilling() {
   const [exportingPdf, setExportingPdf] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<"all" | "incomplete" | "over">("all");
+  const [sortKey, setSortKey] = React.useState<"flat" | "usage">("flat");
 
   const generate = React.useCallback(async () => {
     if (period === "range") {
@@ -697,13 +699,33 @@ export function AdminBilling() {
     } else if (statusFilter === "over") {
       rows = rows.filter(isOverAllowance);
     }
-    return [...rows].sort((a, b) => {
+
+    const byFlatNo = (a: BillRow, b: BillRow) => {
       const na = parseInt(a.flat, 10);
       const nb = parseInt(b.flat, 10);
       if (Number.isNaN(na) || Number.isNaN(nb)) return a.flat.localeCompare(b.flat);
       return na - nb;
-    });
-  }, [report, query, statusFilter, isOverAllowance]);
+    };
+
+    if (sortKey === "usage") {
+      // Highest % of the first slab first. A flat with no reading, or a
+      // tariff with no capped first slab, has no percentage to rank by — push
+      // those to the bottom (by flat no. among themselves) rather than
+      // letting them land at an arbitrary spot among real percentages.
+      return [...rows].sort((a, b) => {
+        const pa = slabUsagePct(a.litres, firstSlabLimit);
+        const pb = slabUsagePct(b.litres, firstSlabLimit);
+        const va = pa != null && hasReading(a.meters) ? pa : null;
+        const vb = pb != null && hasReading(b.meters) ? pb : null;
+        if (va == null && vb == null) return byFlatNo(a, b);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        return vb - va;
+      });
+    }
+
+    return [...rows].sort(byFlatNo);
+  }, [report, query, statusFilter, isOverAllowance, sortKey, firstSlabLimit]);
 
   // The table's own footer sums what's actually listed — with a search or
   // status filter active, showing the whole period's total under 2 visible
@@ -867,29 +889,46 @@ export function AdminBilling() {
         </CardContent>
 
         {report && report.rows.length > 0 && (
-          <CardContent className="flex flex-wrap gap-1.5 border-t border-border pt-3">
-            <StatusChip
-              label="All"
-              active={statusFilter === "all"}
-              onClick={() => setStatusFilter("all")}
-            />
-            <StatusChip
-              label={`Incomplete · ${statusCounts.incomplete}`}
-              active={statusFilter === "incomplete"}
-              onClick={() =>
-                setStatusFilter(statusFilter === "incomplete" ? "all" : "incomplete")
-              }
-              tone="warning"
-              disabled={statusCounts.incomplete === 0}
-            />
-            {firstSlabLimit != null && (
+          <CardContent className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+            <div className="flex flex-wrap gap-1.5">
               <StatusChip
-                label={`Over allowance · ${statusCounts.over}`}
-                active={statusFilter === "over"}
-                onClick={() => setStatusFilter(statusFilter === "over" ? "all" : "over")}
-                tone="destructive"
-                disabled={statusCounts.over === 0}
+                label="All"
+                active={statusFilter === "all"}
+                onClick={() => setStatusFilter("all")}
               />
+              <StatusChip
+                label={`Incomplete · ${statusCounts.incomplete}`}
+                active={statusFilter === "incomplete"}
+                onClick={() =>
+                  setStatusFilter(statusFilter === "incomplete" ? "all" : "incomplete")
+                }
+                tone="warning"
+                disabled={statusCounts.incomplete === 0}
+              />
+              {firstSlabLimit != null && (
+                <StatusChip
+                  label={`Over allowance · ${statusCounts.over}`}
+                  active={statusFilter === "over"}
+                  onClick={() => setStatusFilter(statusFilter === "over" ? "all" : "over")}
+                  tone="destructive"
+                  disabled={statusCounts.over === 0}
+                />
+              )}
+            </div>
+
+            {firstSlabLimit != null && (
+              <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                Sort
+                <Select
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as "flat" | "usage")}
+                  className="h-9 w-auto text-sm"
+                  aria-label="Sort flats"
+                >
+                  <option value="flat">Flat no.</option>
+                  <option value="usage">Highest usage %</option>
+                </Select>
+              </label>
             )}
           </CardContent>
         )}
