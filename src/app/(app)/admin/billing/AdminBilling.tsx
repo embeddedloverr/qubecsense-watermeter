@@ -125,6 +125,25 @@ const daysAgoISO = (n: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+const DAY_MS = 86_400_000;
+/** Inclusive day count between two YYYY-MM-DD dates. */
+function daySpan(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
+}
+
+/** How far into [from, to] today falls — clamped, since `to` may be in the
+ *  future (an open cycle) or the whole range may already be in the past (a
+ *  historical range query, which reads as "100% — complete" rather than a
+ *  percentage of something still ticking). */
+function periodProgress(from: string, to: string) {
+  const totalDays = daySpan(from, to);
+  const today = todayISO();
+  const elapsedDays =
+    today < from ? 0 : today > to ? totalDays : daySpan(from, today);
+  const pct = totalDays > 0 ? Math.min(100, Math.round((elapsedDays / totalDays) * 100)) : 100;
+  return { totalDays, elapsedDays, pct, ongoing: today <= to };
+}
+
 /** Human label for whatever period a report covers — a plain range for a
  *  custom export, the month plus its exact cycle dates when the tariff uses
  *  a non-calendar cycle, or just the month name for the ordinary case. */
@@ -158,6 +177,35 @@ function sumByLocation(meters: Meter[], location: string) {
   return meters
     .filter((m) => (m.location || "").toLowerCase() === location)
     .reduce((a, m) => a + (m.consumptionLitres || 0), 0);
+}
+
+/** % of the first (cheapest) slab a flat has used this period — like a data
+ *  plan's usage bar. `null` when the first slab has no limit (a flat
+ *  per-litre tariff has no "allowance" to show progress against). Can
+ *  exceed 100 once a flat has moved into the next, pricier slab — the caller
+ *  clamps the bar itself but keeps the real number in the label. */
+function slabUsagePct(litres: number, firstSlabLimit: number | null | undefined): number | null {
+  if (!firstSlabLimit || firstSlabLimit <= 0) return null;
+  return (litres / firstSlabLimit) * 100;
+}
+
+function SlabUsageBar({ pct }: { pct: number }) {
+  const over = pct > 100;
+  return (
+    <div className="mt-1 flex items-center gap-1.5">
+      <div className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-muted">
+        <div
+          className={`h-full rounded-full ${over ? "bg-destructive" : "bg-primary"}`}
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </div>
+      <span
+        className={`tabular text-[10px] ${over ? "text-destructive" : "text-muted-foreground"}`}
+      >
+        {Math.round(pct)}%
+      </span>
+    </div>
+  );
 }
 
 /* -------------------------------- CSV / PDF ---------------------------------- */
@@ -651,6 +699,10 @@ export function AdminBilling() {
     };
   }, [filtered]);
 
+  // null when the tariff's first slab has no cap (a flat per-litre rate) —
+  // there's no "allowance" to show a usage bar against in that case.
+  const firstSlabLimit = report?.tariff.slabs[0]?.limitLitres ?? null;
+
   const exportFlatCsv = () => {
     if (!report) return;
     const blob = new Blob([buildFlatCsv(report, filtered)], {
@@ -860,6 +912,42 @@ export function AdminBilling() {
             </div>
           )}
 
+          {/* Cycle progress — how far into this period today falls, so a
+              small total early in the period reads as "not finished yet"
+              rather than as a broken report. */}
+          {report.rows.length > 0 &&
+            (() => {
+              const prog = periodProgress(report.from, report.to);
+              return (
+                <Card className="print:hidden">
+                  <CardContent className="py-3.5">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-foreground">
+                        {prog.ongoing ? "Period in progress" : "Period complete"}
+                      </span>
+                      <span className="tabular text-muted-foreground">
+                        Day {prog.elapsedDays} of {prog.totalDays} · {prog.pct}%
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          prog.ongoing ? "bg-primary" : "bg-success"
+                        }`}
+                        style={{ width: `${prog.pct}%` }}
+                      />
+                    </div>
+                    {prog.ongoing && (
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        Totals below will keep changing until this period closes
+                        on {formatDate(report.to)}.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
           {/* KPIs */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 print:hidden">
             <KpiCard
@@ -949,6 +1037,11 @@ export function AdminBilling() {
                             }`}
                           >
                             {got ? litres(r.litres) : "No data"}
+                            {got &&
+                              (() => {
+                                const pct = slabUsagePct(r.litres, firstSlabLimit);
+                                return pct !== null ? <SlabUsageBar pct={pct} /> : null;
+                              })()}
                           </td>
                           <td className="tabular px-5 py-3 font-medium text-foreground">
                             {rupees(r.amount)}
@@ -1001,6 +1094,11 @@ export function AdminBilling() {
                             {r.ownerName || "—"} ·{" "}
                             {got ? litres(r.litres) : "No data"}
                           </p>
+                          {got &&
+                            (() => {
+                              const pct = slabUsagePct(r.litres, firstSlabLimit);
+                              return pct !== null ? <SlabUsageBar pct={pct} /> : null;
+                            })()}
                         </div>
                         <span className="tabular shrink-0 font-medium text-foreground">
                           {rupees(r.amount)}

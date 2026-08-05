@@ -244,6 +244,14 @@ A flat with no reading in the period shows "No data" rather than a
 fabricated "0 L" in all three — its fixed charge still applies, but the
 figure isn't presented as a real measurement it isn't.
 
+**Progress indicators** — a bar showing how far into the current period today
+falls (e.g. "Day 5 of 31 · 16%"), so a small total early in a cycle reads as
+"not finished yet" rather than a broken report. Each flat also gets a mini
+usage bar against the tariff's first (cheapest) slab — like a data plan's
+usage meter — turning red past 100% once they've moved into the pricier
+slab. Hidden when the first slab has no limit (a flat per-litre tariff has
+no "allowance" to show progress against).
+
 **Search** — filter by flat number or owner name. Narrows the table, its own
 footer total, and all three exports together — search "501", export, and
 the file contains just the matching flats. The KPI cards deliberately stay
