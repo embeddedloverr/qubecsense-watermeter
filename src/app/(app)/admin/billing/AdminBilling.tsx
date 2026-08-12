@@ -27,6 +27,7 @@ import { useToast } from "@/components/Toast";
 import { formatDate } from "@/lib/utils";
 import { ANOMALY_LABEL, hasReading } from "@/lib/flatConsumptionTypes";
 import { renderBillPdf, renderBillImage, type BillPdfData } from "@/lib/billPdf";
+import { applySlabs } from "@/lib/billing";
 
 /* ----------------------------------- Types ---------------------------------- */
 
@@ -782,6 +783,29 @@ export function AdminBilling() {
     report.rows.length > 0 &&
     report.totalLitresExcluded === report.rows.length;
 
+  // Only meaningful mid-cycle: a closed period's "amount so far" already IS
+  // the final amount, so projecting it would just repeat the same number
+  // with a misleading "estimated" label.
+  const prog = report ? periodProgress(report.from, report.to) : null;
+
+  /** Projects a flat's consumption to the full period at its current daily
+   *  pace, then prices that projection the same way the real bill is priced
+   *  — so residents see roughly what they'll owe, not just what's accrued
+   *  so far on day 5 of a 31-day cycle. */
+  const estimateAmount = React.useCallback(
+    (r: BillRow): number | null => {
+      if (!report || !prog || !prog.ongoing || prog.elapsedDays <= 0) return null;
+      if (!hasReading(r.meters)) return null;
+      const projectedLitres = (r.litres / prog.elapsedDays) * prog.totalDays;
+      return applySlabs(
+        projectedLitres,
+        report.tariff.slabs,
+        report.tariff.fixedCharge
+      ).amount;
+    },
+    [report, prog]
+  );
+
   return (
     <div className="space-y-4">
       <TariffEditor
@@ -1005,38 +1029,38 @@ export function AdminBilling() {
           {/* Cycle progress — how far into this period today falls, so a
               small total early in the period reads as "not finished yet"
               rather than as a broken report. */}
-          {report.rows.length > 0 &&
-            (() => {
-              const prog = periodProgress(report.from, report.to);
-              return (
-                <Card className="print:hidden">
-                  <CardContent className="py-3.5">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-foreground">
-                        {prog.ongoing ? "Period in progress" : "Period complete"}
-                      </span>
-                      <span className="tabular text-muted-foreground">
-                        Day {prog.elapsedDays} of {prog.totalDays} · {prog.pct}%
-                      </span>
-                    </div>
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          prog.ongoing ? "bg-primary" : "bg-success"
-                        }`}
-                        style={{ width: `${prog.pct}%` }}
-                      />
-                    </div>
-                    {prog.ongoing && (
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        Totals below will keep changing until this period closes
-                        on {formatDate(report.to)}.
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })()}
+          {report.rows.length > 0 && prog && (
+            <Card className="print:hidden">
+              <CardContent className="py-3.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">
+                    {prog.ongoing ? "Period in progress" : "Period complete"}
+                  </span>
+                  <span className="tabular text-muted-foreground">
+                    Day {prog.elapsedDays} of {prog.totalDays} · {prog.pct}%
+                  </span>
+                </div>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      prog.ongoing ? "bg-primary" : "bg-success"
+                    }`}
+                    style={{ width: `${prog.pct}%` }}
+                  />
+                </div>
+                {prog.ongoing && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Totals below will keep changing until this period closes on{" "}
+                    {formatDate(report.to)}. Each flat also shows an{" "}
+                    <strong className="text-foreground">estimated</strong>{" "}
+                    full-period total, projected from its pace so far — the
+                    amount charged is still the actual accrued total, not the
+                    estimate.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* KPIs */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 print:hidden">
@@ -1137,6 +1161,14 @@ export function AdminBilling() {
                           </td>
                           <td className="tabular px-5 py-3 font-medium text-foreground">
                             {rupees(r.amount)}
+                            {(() => {
+                              const est = estimateAmount(r);
+                              return est !== null ? (
+                                <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">
+                                  Est. {rupees(est)} full period
+                                </p>
+                              ) : null;
+                            })()}
                           </td>
                           <td className="px-5 py-3 text-right print:hidden">
                             <Button
@@ -1192,9 +1224,17 @@ export function AdminBilling() {
                               return pct !== null ? <SlabUsageBar pct={pct} /> : null;
                             })()}
                         </div>
-                        <span className="tabular shrink-0 font-medium text-foreground">
+                        <div className="tabular shrink-0 text-right font-medium text-foreground">
                           {rupees(r.amount)}
-                        </span>
+                          {(() => {
+                            const est = estimateAmount(r);
+                            return est !== null ? (
+                              <p className="text-[11px] font-normal text-muted-foreground">
+                                Est. {rupees(est)}
+                              </p>
+                            ) : null;
+                          })()}
+                        </div>
                       </button>
                     </li>
                   );

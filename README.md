@@ -252,6 +252,14 @@ usage meter — turning red past 100% once they've moved into the pricier
 slab. Hidden when the first slab has no limit (a flat per-litre tariff has
 no "allowance" to show progress against).
 
+**Estimated full-period total** — while a cycle or range is still open (not
+yet reached its end date), each flat shows a projection under its amount:
+its consumption so far, extrapolated to the full period at the same daily
+pace, then priced through the real slabs. Purely informational — the amount
+actually charged (and exported/emailed) is always the real accrued total,
+never the projection. Disappears once the period closes, since the actual
+total already IS the final figure at that point.
+
 **Search and filter** — search by flat number or owner name, plus status
 chips: **Incomplete** and **Over allowance** (crossed into the tariff's
 second slab; hidden when the first slab has no limit). Both narrow the
