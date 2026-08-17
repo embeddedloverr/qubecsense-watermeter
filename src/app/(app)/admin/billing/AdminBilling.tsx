@@ -806,17 +806,6 @@ export function AdminBilling() {
     [report, prog]
   );
 
-  // Sum of the estimates across whatever's currently listed — same "the
-  // footer reflects what's filtered" rule as filteredTotals. A flat with no
-  // estimate (no reading) contributes its real amount instead of being
-  // dropped, same reasoning as "Total billed" already not excluding no-data
-  // flats: the fixed charge is still real money regardless of whether the
-  // meter reported, so silently omitting it would understate the total.
-  const filteredEstimateTotal = React.useMemo(() => {
-    if (!prog?.ongoing) return null;
-    return filtered.reduce((a, r) => a + (estimateAmount(r) ?? r.amount), 0);
-  }, [filtered, estimateAmount, prog]);
-
   return (
     <div className="space-y-4">
       <TariffEditor
@@ -1199,14 +1188,7 @@ export function AdminBilling() {
                       <td className="px-5 py-3">Total</td>
                       <td className="px-5 py-3" />
                       <td className="tabular px-5 py-3">{litres(filteredTotals.totalLitres)}</td>
-                      <td className="tabular px-5 py-3">
-                        {rupees(filteredTotals.totalAmount)}
-                        {filteredEstimateTotal !== null && (
-                          <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">
-                            Est. {rupees(filteredEstimateTotal)} full period
-                          </p>
-                        )}
-                      </td>
+                      <td className="tabular px-5 py-3">{rupees(filteredTotals.totalAmount)}</td>
                       <td className="print:hidden" />
                     </tr>
                   </tfoot>
@@ -1259,14 +1241,7 @@ export function AdminBilling() {
                 })}
                 <li className="flex items-center justify-between px-4 py-3 font-semibold">
                   <span>Total</span>
-                  <div className="tabular text-right">
-                    {rupees(filteredTotals.totalAmount)}
-                    {filteredEstimateTotal !== null && (
-                      <p className="text-[11px] font-normal text-muted-foreground">
-                        Est. {rupees(filteredEstimateTotal)}
-                      </p>
-                    )}
-                  </div>
+                  <span className="tabular">{rupees(filteredTotals.totalAmount)}</span>
                 </li>
               </ul>
             </Card>
