@@ -533,6 +533,7 @@ export function ResidentView({
   dates,
   month,
   monthLitres,
+  monthComplete,
   billAmount,
   breakdown,
   fixedCharge,
@@ -545,6 +546,9 @@ export function ResidentView({
   dates: string[];
   month: string;
   monthLitres: number;
+  /** False when a meter has no reading at all for this period yet — the
+   *  figures above may still change more than usual once it reports. */
+  monthComplete: boolean;
   billAmount: number;
   breakdown: SlabCharge[];
   fixedCharge: number;
@@ -635,7 +639,11 @@ export function ResidentView({
               {tariffConfigured ? rupees(billAmount) : "—"}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {tariffConfigured ? "So far this month" : "Tariff not set"}
+              {!tariffConfigured
+                ? "Tariff not set"
+                : !monthComplete
+                  ? "So far this month — a meter hasn't reported yet"
+                  : "So far this month"}
             </p>
           </CardContent>
         </Card>

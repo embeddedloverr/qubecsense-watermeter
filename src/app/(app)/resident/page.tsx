@@ -7,9 +7,16 @@ import {
   fetchLiveData,
   LiveDataError,
   resolveSiteCreds,
+  type LiveDataCreds,
   type LiveFlat,
 } from "@/lib/liveData";
-import { applySlabs, type Slab } from "@/lib/billing";
+import { fetchFlatRange } from "@/lib/flatConsumption";
+import {
+  applySlabs,
+  resolveBillingPeriod,
+  resolveFlatConsumption,
+  type Slab,
+} from "@/lib/billing";
 import { usageInPeriod, periodRange, type BudgetPeriod } from "@/lib/budget";
 import { Card, CardContent } from "@/components/ui";
 import { IconAlert } from "@/components/icons";
@@ -42,9 +49,10 @@ export default async function ResidentHome() {
   let building: string | null = null;
   let dates: string[] = [];
   let error: string | null = null;
+  let creds: LiveDataCreds | undefined;
 
   try {
-    const creds = siteId ? await resolveSiteCreds(siteId) : undefined;
+    creds = siteId ? await resolveSiteCreds(siteId) : undefined;
     const data = await fetchLiveData({ days: 32, flat: flatNumber }, creds);
     project = data.project;
     building = data.building;
@@ -59,11 +67,49 @@ export default async function ResidentHome() {
 
   const slabs: Slab[] = (tariffDoc as any)?.slabs || [];
   const fixedCharge: number = (tariffDoc as any)?.fixedCharge || 0;
+  const billingCycleStartDay: number =
+    (tariffDoc as any)?.billingCycleStartDay || 1;
 
-  // Current-month consumption + bill from the flat's readings.
+  // Current-month consumption + bill, priced the same way admin Billing
+  // prices it — from totalizer start→end deltas, correction-aware — rather
+  // than summed from the intraday packets the chart below uses. Those two
+  // sources can disagree by design (see billing/report/route.ts): a resident
+  // should never see a different "so far this month" figure here than what
+  // Billing will actually charge them. Falls back to the intraday sum only
+  // if the totalizer-delta source can't be reached at all.
   const month = currentMonth();
   let monthLitres = 0;
-  if (flat) {
+  let monthComplete = true;
+  let monthSourceOk = false;
+  if (creds && flatNumber) {
+    try {
+      const resolvedPeriod = resolveBillingPeriod(
+        "cycle",
+        { month },
+        billingCycleStartDay
+      );
+      if (resolvedPeriod.ok) {
+        const range = await fetchFlatRange(
+          {
+            from: resolvedPeriod.period.from,
+            to: resolvedPeriod.period.to,
+            flat: flatNumber,
+          },
+          creds
+        );
+        const entry = range.flats.find((f) => f.flat === flatNumber);
+        if (entry) {
+          const resolved = resolveFlatConsumption(flatNumber, entry);
+          monthLitres = resolved.litres;
+          monthComplete = resolved.complete;
+          monthSourceOk = true;
+        }
+      }
+    } catch {
+      // Fall through to the intraday-sum fallback below.
+    }
+  }
+  if (!monthSourceOk && flat) {
     for (const m of flat.meters) {
       for (const r of m.readings) {
         if (r.date.startsWith(month)) monthLitres += r.consumptionLitres;
@@ -171,6 +217,7 @@ export default async function ResidentHome() {
           dates={dates}
           month={month}
           monthLitres={monthLitres}
+          monthComplete={monthComplete}
           billAmount={bill.amount}
           breakdown={bill.breakdown}
           fixedCharge={fixedCharge}
