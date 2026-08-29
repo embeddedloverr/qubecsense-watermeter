@@ -213,11 +213,36 @@ artifact of how packets happened to bucket through the day. This also
 removed the old 92-day/3-month lookback limit: a cycle or range can reach as
 far back as the meters have data.
 
-Two anomalies are called out explicitly rather than silently folded into the
-number: `no_reading_in_period` (nothing to compute from) and
+Four anomalies are called out explicitly rather than silently folded into the
+number — `no_reading_in_period` (nothing to compute from),
 `totalizer_decreased` (almost always a meter reset or replacement, not
-negative consumption) — both mark that flat's bill `Incomplete`, and its
-consumption shows as "No data" rather than a fabricated `0 L`.
+negative consumption), and two for **shared-plumbing corrections**
+(`overlap_correction_data_missing`, `overlap_deduction_exceeds_reading` — see
+below) — each marks that flat's bill `Incomplete`, and its consumption shows
+as "No data" rather than a fabricated `0 L`.
+
+### Shared-plumbing corrections
+
+A handful of meters (kitchen/bathroom for flats 203, 301, 201) were
+retrofitted onto pipe runs that also carry another flat's water — a fixed
+physical fact of the installation, confirmed with the building owner, not a
+data glitch. nudron-dashboard subtracts the overlapping flat's same-period
+usage before this app ever sees the number, so `consumptionLitres` (what
+gets billed) is already correct with no changes needed here. What this app
+adds is making the correction **visible** rather than a silent adjustment
+that would otherwise look like a bug:
+
+- The Bill modal shows a `Corrected for shared plumbing: X raw − Y (Flat Z)`
+  line under any meter that was actually adjusted, so its totalizer delta
+  not matching the litres shown is explained, not mysterious.
+- The Meter-wise CSV carries `Raw consumption (L)` and
+  `Shared-plumbing deduction (L)` columns alongside the corrected figure —
+  the full arithmetic, for an audit.
+- **Live Data does not apply this correction** — it prices off a different,
+  older endpoint the correction was never added to. A note on that page
+  names the affected flats and points to Billing for the accurate figure, so
+  the two pages disagreeing on these flats specifically doesn't read as a
+  bug report waiting to happen.
 
 **Period** — two ways to pick what a report covers:
 - **Cycle** — the recurring monthly bill. Defaults to the calendar month; set

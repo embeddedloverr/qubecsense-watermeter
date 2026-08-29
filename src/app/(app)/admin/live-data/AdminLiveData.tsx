@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   ResponsiveContainer,
   BarChart,
@@ -189,6 +190,15 @@ function FlagBadge({ flag }: { flag: string }) {
     </Badge>
   );
 }
+
+// Flats whose kitchen/bathroom meter shares plumbing with another flat's
+// meter (a fixed physical fact — see nudron-dashboard's
+// METER_OVERLAP_CORRECTIONS). This page shows the raw totalizer reading,
+// same as it always has; only Billing (which prices off the
+// flat-consumption API, not this one) applies the correction. Kept as a
+// plain list here purely for the note below — this page doesn't otherwise
+// need to know which meters are affected.
+const SHARED_PLUMBING_FLATS = ["203", "301", "201"];
 
 /* ---------------------------------- Charts ---------------------------------- */
 
@@ -975,6 +985,20 @@ export function AdminLiveData() {
         </span>
         {updatedAt && <span>Updated {updatedAt.toLocaleTimeString("en-IN")}</span>}
         {error && <span className="text-destructive">Last refresh failed: {error}</span>}
+      </div>
+
+      {/* Shared-plumbing note — flats {SHARED_PLUMBING_FLATS} show raw
+          readings here; Billing shows the corrected figure for them. */}
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3.5 py-2.5 text-xs text-muted-foreground">
+        <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Flats {SHARED_PLUMBING_FLATS.join(", ")} share kitchen/bathroom
+          plumbing with another flat. The totals here are raw meter readings
+          — <Link href="/admin/billing" className="underline underline-offset-2">
+            Billing
+          </Link>{" "}
+          shows the corrected, accurate consumption for these flats.
+        </span>
       </div>
 
       {/* KPIs */}

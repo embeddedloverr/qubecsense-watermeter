@@ -42,6 +42,11 @@ interface SlabCharge {
   amount: number;
 }
 
+interface MeterCorrection {
+  subtractedFrom: { deviceKey: string; consumptionLitres: number }[];
+  note: string;
+}
+
 interface Meter {
   deviceId: string;
   deviceKey: string;
@@ -50,8 +55,21 @@ interface Meter {
   totalizerStartDate: string | null;
   totalizerEnd: number | null;
   totalizerEndDate: string | null;
+  /** The meter's own uncorrected delta — equal to consumptionLitres unless
+   *  `correction` is set. */
+  rawConsumptionLitres?: number | null;
+  /** How much of rawConsumptionLitres was subtracted for shared plumbing. */
+  overlapDeductionLitres?: number;
   consumptionLitres: number | null;
-  anomaly: "no_reading_in_period" | "totalizer_decreased" | null;
+  anomaly:
+    | "no_reading_in_period"
+    | "totalizer_decreased"
+    | "overlap_correction_data_missing"
+    | "overlap_deduction_exceeds_reading"
+    | null;
+  /** Set only on a meter whose reading was actually adjusted this period for
+   *  shared plumbing with another flat's meter (a fixed physical fact). */
+  correction?: MeterCorrection | null;
 }
 
 interface BillRow {
@@ -266,6 +284,8 @@ function buildDetailedCsv(flatRows: BillRow[]): string {
     "Totalizer start date",
     "Totalizer end",
     "Totalizer end date",
+    "Raw consumption (L)",
+    "Shared-plumbing deduction (L)",
     "Consumption (L)",
     "Anomaly",
     "Complete",
@@ -286,6 +306,8 @@ function buildDetailedCsv(flatRows: BillRow[]): string {
         m?.totalizerStartDate || "",
         m?.totalizerEnd ?? "",
         m?.totalizerEndDate || "",
+        m?.rawConsumptionLitres ?? "",
+        m?.overlapDeductionLitres || "",
         m?.consumptionLitres ?? "",
         m?.anomaly ? ANOMALY_LABEL[m.anomaly] || m.anomaly : "",
         r.complete ? "Yes" : "No",
@@ -669,6 +691,20 @@ export function AdminBilling() {
   React.useEffect(() => {
     generate();
   }, [generate]);
+
+  // A handful of meters share plumbing with another flat's meter (a fixed
+  // physical fact, not a data issue) and have their reading corrected for
+  // it upstream. This resolves the OTHER meter's deviceKey — the one that
+  // was subtracted — back to a flat number, so the Bill modal can say
+  // "shared with Flat 101" instead of a bare device id nobody recognizes.
+  const deviceKeyToFlat = React.useMemo(() => {
+    const map = new Map<string, string>();
+    if (!report) return map;
+    for (const r of report.rows) {
+      for (const m of r.meters) map.set(m.deviceKey, r.flat);
+    }
+    return map;
+  }, [report]);
 
   // null when the tariff's first slab has no cap (a flat per-litre rate) —
   // there's no "allowance" to show a usage bar against in that case, and
@@ -1255,6 +1291,7 @@ export function AdminBilling() {
           periodText={periodLabel(report)}
           project={report.project}
           building={report.building}
+          deviceKeyToFlat={deviceKeyToFlat}
           sendPayload={
             period === "range"
               ? { period: "range", from, to }
@@ -1367,6 +1404,7 @@ function BillModal({
   periodText,
   project,
   building,
+  deviceKeyToFlat,
   sendPayload,
   onClose,
 }: {
@@ -1374,6 +1412,7 @@ function BillModal({
   periodText: string;
   project: string | null;
   building: string | null;
+  deviceKeyToFlat: Map<string, string>;
   sendPayload: SendPayload;
   onClose: () => void;
 }) {
@@ -1543,6 +1582,27 @@ function BillModal({
                         {m.totalizerStartDate && m.totalizerEndDate
                           ? ` (${m.totalizerStartDate} → ${m.totalizerEndDate})`
                           : ""}
+                      </p>
+                    )}
+                    {/* Shared-plumbing correction: this meter's own totalizer
+                        delta includes water another flat actually used, so the
+                        litres above won't match "raw" totalizer arithmetic
+                        unless this is shown — without it, a real correction
+                        reads exactly like the app got the math wrong. */}
+                    {!m.anomaly && m.correction && (
+                      <p className="mt-1 text-xs text-warning">
+                        Corrected for shared plumbing:{" "}
+                        {m.rawConsumptionLitres != null ? litres(m.rawConsumptionLitres) : "—"} raw
+                        {" − "}
+                        {m.correction.subtractedFrom.map((s, i) => (
+                          <React.Fragment key={s.deviceKey}>
+                            {i > 0 && " − "}
+                            {litres(s.consumptionLitres)}
+                            {deviceKeyToFlat.has(s.deviceKey)
+                              ? ` (Flat ${deviceKeyToFlat.get(s.deviceKey)})`
+                              : ""}
+                          </React.Fragment>
+                        ))}
                       </p>
                     )}
                   </li>
