@@ -1,3 +1,103 @@
+// `import type` only — erased at compile time, so this file (imported both
+// client-side for the lazy PDF share button and server-side in the billing
+// routes) never actually pulls flatConsumptionTypes.ts's runtime code in.
+import type { FlatConsumptionMeter } from "./flatConsumptionTypes";
+
+/**
+ * Flats whose shared-plumbing correction (see nudron-dashboard's
+ * METER_OVERLAP_CORRECTIONS) is temporarily bypassed for BILLING purposes
+ * only. Reason: the correction subtracts flat 101's/103's same-period
+ * usage from these flats' affected meter, but 101/103 were only just fully
+ * mapped and have almost no reading history yet — so the subtraction
+ * routinely has nothing to subtract, and 301/201/203 show as `Incomplete`
+ * far more often than their own meter's actual data would justify. Billing
+ * them on the raw (uncorrected) reading in the meantime is imperfect —
+ * it re-admits the very over-count the correction exists to remove — but
+ * it's less wrong than "no bill at all" while 101/103 build up history.
+ *
+ * To re-enable the correction once 101/103 have a few weeks of data,
+ * empty this array (or drop specific flats from it). Nothing else needs to
+ * change — resolveBillingConsumption() falls straight back to nudron's own
+ * corrected number the moment a flat isn't listed here.
+ */
+export const PAUSED_OVERLAP_CORRECTION_FLATS: readonly string[] = [
+  "201",
+  "203",
+  "301",
+];
+
+export interface ResolvedFlatConsumption {
+  litres: number;
+  complete: boolean;
+  meters: FlatConsumptionMeter[];
+  /** True when this flat's number came from raw readings because its
+   *  shared-plumbing correction is paused (see
+   *  PAUSED_OVERLAP_CORRECTION_FLATS), not from nudron's corrected value. */
+  overlapCorrectionPaused: boolean;
+}
+
+const OVERLAP_ANOMALIES = new Set([
+  "overlap_correction_data_missing",
+  "overlap_deduction_exceeds_reading",
+]);
+
+/**
+ * The litres/complete/meters a flat is actually billed on — nudron's own
+ * corrected figure normally, or a raw-reading recomputation for a paused
+ * flat.
+ *
+ * For a paused flat, this rewrites each overlap-anomalous meter's own
+ * `consumptionLitres` to its raw value (anomaly/correction cleared) rather
+ * than only adjusting the flat-level total. That's deliberate: `hasReading`,
+ * `isOverAllowance`, the CSV/PDF exports, and the table's "No data" check
+ * all key off `meters[].consumptionLitres` — leaving it null while
+ * separately overriding the flat's litres would show "No data" right next
+ * to a real, computed amount, which is exactly the kind of mismatch this
+ * app has spent effort elsewhere explaining away, not one worth introducing
+ * fresh here. `overlapCorrectionPaused` is the one flag a UI needs to say
+ * "this number is raw, not nudron's corrected figure" without re-deriving
+ * it per meter.
+ */
+export function resolveFlatConsumption(
+  flat: string,
+  entry: {
+    consumptionLitres: number;
+    complete: boolean;
+    meters: FlatConsumptionMeter[];
+  }
+): ResolvedFlatConsumption {
+  if (!PAUSED_OVERLAP_CORRECTION_FLATS.includes(flat)) {
+    return {
+      litres: entry.consumptionLitres,
+      complete: entry.complete,
+      meters: entry.meters,
+      overlapCorrectionPaused: false,
+    };
+  }
+
+  let litres = 0;
+  let complete = true;
+  const meters = entry.meters.map((m) => {
+    // A meter anomalous ONLY because the correction couldn't be computed
+    // (its own raw reading is fine) falls back to that raw reading. Any
+    // other anomaly (no_reading_in_period, totalizer_decreased) means
+    // there's genuinely no usable number, paused or not.
+    if (m.anomaly && OVERLAP_ANOMALIES.has(m.anomaly)) {
+      if (m.rawConsumptionLitres == null) {
+        complete = false;
+        return m; // nothing to fall back to — leave the real anomaly visible
+      }
+      litres += m.rawConsumptionLitres;
+      return { ...m, consumptionLitres: m.rawConsumptionLitres, anomaly: null, correction: null };
+    }
+    if (m.consumptionLitres != null) litres += m.consumptionLitres;
+    else complete = false;
+    return m;
+  });
+
+  return { litres, complete, meters, overlapCorrectionPaused: true };
+}
+
 /**
  * Resolve a "billing month" + cycle start day into the actual [from, to]
  * calendar dates the bill covers (both inclusive, YYYY-MM-DD).

@@ -45,6 +45,8 @@ export interface BillPdfData {
 export const BILL_ANOMALY_LABEL: Record<string, string> = {
   no_reading_in_period: "No reading in period",
   totalizer_decreased: "Meter reset or replaced",
+  overlap_correction_data_missing: "Shared-plumbing meter hasn't reported",
+  overlap_deduction_exceeds_reading: "Shared-plumbing reading mismatch",
 };
 
 const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;

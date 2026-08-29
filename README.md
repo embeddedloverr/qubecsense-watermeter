@@ -244,6 +244,20 @@ that would otherwise look like a bug:
   the two pages disagreeing on these flats specifically doesn't read as a
   bug report waiting to happen.
 
+**Correction temporarily paused for 201/203/301** —
+`PAUSED_OVERLAP_CORRECTION_FLATS` in `lib/billing.ts`. Flats 101/103 (the
+ones being subtracted) were only just fully mapped and have almost no
+reading history yet, so the correction routinely has nothing to subtract —
+201/203/301 were showing `Incomplete` far more often than their own meter's
+data justified. Billed on the raw (uncorrected) reading in the meantime,
+marked with a **Raw reading** badge everywhere the flat appears (table,
+mobile list, Bill modal) plus a note in the modal explaining why, so it
+reads as a deliberate, temporary state rather than the correction having
+silently vanished. To re-enable once 101/103 have a few weeks of data,
+empty the array (or drop specific flats from it) — nothing else needs to
+change; `resolveFlatConsumption()` falls straight back to nudron's own
+corrected figure the moment a flat isn't listed.
+
 **Period** — two ways to pick what a report covers:
 - **Cycle** — the recurring monthly bill. Defaults to the calendar month; set
   **Billing cycle start day** in the tariff card for a different cycle, e.g.

@@ -3,7 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { guard } from "@/lib/guard";
-import { applySlabs, resolveBillingPeriod, type Slab } from "@/lib/billing";
+import {
+  applySlabs,
+  resolveBillingPeriod,
+  resolveFlatConsumption,
+  type Slab,
+} from "@/lib/billing";
 import { LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 import { fetchFlatRange, hasReading } from "@/lib/flatConsumption";
 
@@ -70,8 +75,9 @@ export async function GET(req: NextRequest) {
 
     const rows = consumption.flats.map((f) => {
       const owner = ownerByFlat.get(String(f.flat));
+      const resolvedConsumption = resolveFlatConsumption(f.flat, f);
       const { breakdown, amount } = applySlabs(
-        f.consumptionLitres,
+        resolvedConsumption.litres,
         slabs,
         fixedCharge
       );
@@ -80,9 +86,10 @@ export async function GET(req: NextRequest) {
         ownerName: owner?.ownerName || "",
         ownerPhone: owner?.ownerPhone || "",
         ownerEmail: owner?.ownerEmail || "",
-        litres: f.consumptionLitres,
-        complete: f.complete,
-        meters: f.meters,
+        litres: resolvedConsumption.litres,
+        complete: resolvedConsumption.complete,
+        meters: resolvedConsumption.meters,
+        overlapCorrectionPaused: resolvedConsumption.overlapCorrectionPaused,
         breakdown,
         fixedCharge,
         amount,

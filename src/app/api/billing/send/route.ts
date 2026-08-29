@@ -3,7 +3,12 @@ import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { guard } from "@/lib/guard";
-import { applySlabs, resolveBillingPeriod, type Slab } from "@/lib/billing";
+import {
+  applySlabs,
+  resolveBillingPeriod,
+  resolveFlatConsumption,
+  type Slab,
+} from "@/lib/billing";
 import { LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 import { fetchFlatRange } from "@/lib/flatConsumption";
 import { renderBillPdf, type BillPdfData } from "@/lib/billPdf";
@@ -95,8 +100,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const resolvedConsumption = resolveFlatConsumption(flat, entry);
     const { breakdown, amount } = applySlabs(
-      entry.consumptionLitres,
+      resolvedConsumption.litres,
       slabs,
       fixedCharge
     );
@@ -115,9 +121,9 @@ export async function POST(req: NextRequest) {
       project: g.ctx.site.project || null,
       building: g.ctx.site.building || null,
       periodLabel,
-      meters: entry.meters,
-      litres: entry.consumptionLitres,
-      complete: entry.complete,
+      meters: resolvedConsumption.meters,
+      litres: resolvedConsumption.litres,
+      complete: resolvedConsumption.complete,
       breakdown,
       fixedCharge,
       amount,

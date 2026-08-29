@@ -80,6 +80,11 @@ interface BillRow {
   litres: number;
   complete: boolean;
   meters: Meter[];
+  /** True when this flat's shared-plumbing correction is currently paused
+   *  for billing (see PAUSED_OVERLAP_CORRECTION_FLATS server-side) — its
+   *  litres/amount come from raw meter readings, not nudron's corrected
+   *  figure. */
+  overlapCorrectionPaused: boolean;
   breakdown: SlabCharge[];
   fixedCharge: number;
   amount: number;
@@ -1178,6 +1183,9 @@ export function AdminBilling() {
                               {!r.complete && (
                                 <Badge tone="warning">Incomplete</Badge>
                               )}
+                              {r.overlapCorrectionPaused && (
+                                <Badge tone="neutral">Raw reading</Badge>
+                              )}
                             </div>
                           </td>
                           <td className="px-5 py-3 text-muted-foreground">
@@ -1248,6 +1256,9 @@ export function AdminBilling() {
                             </p>
                             {!r.complete && (
                               <Badge tone="warning">Incomplete</Badge>
+                            )}
+                            {r.overlapCorrectionPaused && (
+                              <Badge tone="neutral">Raw reading</Badge>
                             )}
                           </div>
                           <p className="truncate text-sm text-muted-foreground">
@@ -1526,6 +1537,9 @@ function BillModal({
             <h2 className="tabular flex items-center gap-1.5 text-lg font-bold text-foreground">
               Flat {row.flat}
               {!row.complete && <Badge tone="warning">Incomplete</Badge>}
+              {row.overlapCorrectionPaused && (
+                <Badge tone="neutral">Raw reading</Badge>
+              )}
             </h2>
             <p className="text-sm text-muted-foreground">
               {row.ownerName || "—"}
@@ -1547,6 +1561,20 @@ function BillModal({
             <p className="text-xs text-muted-foreground">
               {[project, building].filter(Boolean).join(" · ")}
             </p>
+          )}
+
+          {row.overlapCorrectionPaused && (
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+              <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                This flat&apos;s meter shares plumbing with another flat.
+                The shared-plumbing correction is temporarily paused for
+                billing — the figures below are the raw meter readings,
+                not the corrected value — until that other flat has built
+                up enough reading history for the correction to compute
+                reliably.
+              </span>
+            </div>
           )}
 
           {/* Meter split — device id + totalizer readings behind the total */}
