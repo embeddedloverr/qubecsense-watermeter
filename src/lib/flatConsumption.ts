@@ -86,3 +86,55 @@ export function fetchFlatRange(
 }> {
   return callFlatConsumption("/api/v1/flat-consumption/range", opts, creds);
 }
+
+function eachDateInclusive(from: string, to: string): string[] {
+  const dates: string[] = [];
+  let cur = new Date(`${from}T00:00:00Z`).getTime();
+  const end = new Date(`${to}T00:00:00Z`).getTime();
+  while (cur <= end) {
+    dates.push(new Date(cur).toISOString().slice(0, 10));
+    cur += 86400000;
+  }
+  return dates;
+}
+
+/**
+ * Per-day, per-meter consumption across [from, to], as
+ * Map<deviceKey, Map<date, litres>> — used to estimate a meter that came
+ * back with no reading at all for the full-period range query, from
+ * whatever daily data does exist elsewhere in the same period.
+ *
+ * The daily endpoint only takes a single date, not a range, so this fetches
+ * one day at a time in parallel across every flat at once (rather than per
+ * flat) — the report only needs this when some row is incomplete, and one
+ * shared fetch covers all of them. A day that fails to fetch is silently
+ * dropped rather than failing the whole series — an estimate built from
+ * fewer days is still better than none.
+ */
+export async function fetchDailySeries(
+  from: string,
+  to: string,
+  creds: LiveDataCreds
+): Promise<Map<string, Map<string, number>>> {
+  const dates = eachDateInclusive(from, to);
+  const days = await Promise.all(
+    dates.map((date) => fetchFlatDaily({ date }, creds).catch(() => null))
+  );
+
+  const series = new Map<string, Map<string, number>>();
+  days.forEach((day, i) => {
+    if (!day) return;
+    for (const flatEntry of day.flats) {
+      for (const m of flatEntry.meters) {
+        if (m.consumptionLitres == null) continue;
+        let byDate = series.get(m.deviceKey);
+        if (!byDate) {
+          byDate = new Map();
+          series.set(m.deviceKey, byDate);
+        }
+        byDate.set(dates[i], m.consumptionLitres);
+      }
+    }
+  });
+  return series;
+}

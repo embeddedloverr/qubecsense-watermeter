@@ -72,6 +72,12 @@ interface Meter {
   correction?: MeterCorrection | null;
 }
 
+interface MeterEstimate {
+  deviceKey: string;
+  litres: number;
+  daysUsed: number;
+}
+
 interface BillRow {
   flat: string;
   ownerName: string;
@@ -88,6 +94,15 @@ interface BillRow {
   breakdown: SlabCharge[];
   fixedCharge: number;
   amount: number;
+  /** Set when this row is incomplete and at least one missing meter could
+   *  be filled from that same meter's own average daily usage elsewhere in
+   *  this same billing period — an estimate shown alongside the real
+   *  (incomplete) bill, never folded into `litres`/`amount` itself. */
+  estimatedLitres: number | null;
+  estimatedAmount: number | null;
+  estimatedMeters: MeterEstimate[];
+  /** True only if every meter missing a reading got an estimate. */
+  fullyEstimated: boolean;
 }
 
 interface Report {
@@ -847,6 +862,26 @@ export function AdminBilling() {
     [report, prog]
   );
 
+  /** The one "Est." figure to show next to a row's amount: the same-month
+   *  average fill-in when this row is missing a meter reading (the more
+   *  specific number — it says what a *missing* meter probably used), else
+   *  the ongoing-period pace projection (what a row WITH data will likely
+   *  total by period end). A row can't need both at once in practice: the
+   *  pace projection only fires for a row with real data to project from. */
+  const displayEstimate = React.useCallback(
+    (r: BillRow): { amount: number; label: string } | null => {
+      if (r.estimatedAmount != null) {
+        return {
+          amount: r.estimatedAmount,
+          label: r.fullyEstimated ? "same-month avg" : "partial · same-month avg",
+        };
+      }
+      const est = estimateAmount(r);
+      return est !== null ? { amount: est, label: "full period" } : null;
+    },
+    [estimateAmount]
+  );
+
   return (
     <div className="space-y-4">
       <TariffEditor
@@ -1186,6 +1221,9 @@ export function AdminBilling() {
                               {r.overlapCorrectionPaused && (
                                 <Badge tone="neutral">Raw reading</Badge>
                               )}
+                              {r.estimatedAmount != null && (
+                                <Badge tone="neutral">Estimated</Badge>
+                              )}
                             </div>
                           </td>
                           <td className="px-5 py-3 text-muted-foreground">
@@ -1206,10 +1244,10 @@ export function AdminBilling() {
                           <td className="tabular px-5 py-3 font-medium text-foreground">
                             {rupees(r.amount)}
                             {(() => {
-                              const est = estimateAmount(r);
+                              const est = displayEstimate(r);
                               return est !== null ? (
                                 <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">
-                                  Est. {rupees(est)} full period
+                                  Est. {rupees(est.amount)} {est.label}
                                 </p>
                               ) : null;
                             })()}
@@ -1260,6 +1298,9 @@ export function AdminBilling() {
                             {r.overlapCorrectionPaused && (
                               <Badge tone="neutral">Raw reading</Badge>
                             )}
+                            {r.estimatedAmount != null && (
+                              <Badge tone="neutral">Estimated</Badge>
+                            )}
                           </div>
                           <p className="truncate text-sm text-muted-foreground">
                             {r.ownerName || "—"} ·{" "}
@@ -1274,10 +1315,10 @@ export function AdminBilling() {
                         <div className="tabular shrink-0 text-right font-medium text-foreground">
                           {rupees(r.amount)}
                           {(() => {
-                            const est = estimateAmount(r);
+                            const est = displayEstimate(r);
                             return est !== null ? (
                               <p className="text-[11px] font-normal text-muted-foreground">
-                                Est. {rupees(est)}
+                                Est. {rupees(est.amount)}
                               </p>
                             ) : null;
                           })()}
@@ -1540,6 +1581,9 @@ function BillModal({
               {row.overlapCorrectionPaused && (
                 <Badge tone="neutral">Raw reading</Badge>
               )}
+              {row.estimatedAmount != null && (
+                <Badge tone="neutral">Estimated</Badge>
+              )}
             </h2>
             <p className="text-sm text-muted-foreground">
               {row.ownerName || "—"}
@@ -1577,6 +1621,27 @@ function BillModal({
             </div>
           )}
 
+          {row.estimatedAmount != null && (
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+              <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {row.fullyEstimated
+                  ? "One or more meters had no reading at all this period."
+                  : "One or more meters had no reading at all this period, and at least one of them has too little history elsewhere in this period to estimate."}{" "}
+                Where possible, the missing meter&apos;s usage was estimated
+                from that meter&apos;s own average daily usage on the days it
+                did report this period, scaled to the full period — shown
+                below as{" "}
+                <strong className="text-foreground">
+                  Est. {rupees(row.estimatedAmount)}
+                </strong>
+                . The amount actually charged still reflects only real
+                readings; the estimate will be replaced once this meter
+                reports again.
+              </span>
+            </div>
+          )}
+
           {/* Meter split — device id + totalizer readings behind the total */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-foreground">
@@ -1604,7 +1669,20 @@ function BillModal({
                         <IconAlert className="h-3 w-3" />
                         {ANOMALY_LABEL[m.anomaly] || m.anomaly}
                       </p>
-                    ) : (
+                    ) : null}
+                    {(() => {
+                      const est = row.estimatedMeters.find(
+                        (e) => e.deviceKey === m.deviceKey
+                      );
+                      return est ? (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Estimated {litres(est.litres)} from {est.daysUsed}{" "}
+                          day{est.daysUsed === 1 ? "" : "s"} of data this
+                          period.
+                        </p>
+                      ) : null;
+                    })()}
+                    {!m.anomaly && !row.estimatedMeters.some((e) => e.deviceKey === m.deviceKey) && (
                       <p className="mt-1 tabular text-xs text-muted-foreground">
                         Totalizer {m.totalizerStart ?? "—"} → {m.totalizerEnd ?? "—"}
                         {m.totalizerStartDate && m.totalizerEndDate
@@ -1642,6 +1720,12 @@ function BillModal({
                   {got ? litres(row.litres) : "No data"}
                 </span>
               </li>
+              {row.estimatedLitres != null && (
+                <li className="flex justify-between text-xs text-muted-foreground">
+                  <span>Estimated total</span>
+                  <span className="tabular">{litres(row.estimatedLitres)}</span>
+                </li>
+              )}
             </ul>
           </div>
 

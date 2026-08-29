@@ -5,12 +5,20 @@ import { Tariff } from "@/lib/models/Tariff";
 import { guard } from "@/lib/guard";
 import {
   applySlabs,
+  estimateFlatConsumption,
   resolveBillingPeriod,
   resolveFlatConsumption,
   type Slab,
 } from "@/lib/billing";
 import { LiveDataError, resolveSiteCreds } from "@/lib/liveData";
-import { fetchFlatRange, hasReading } from "@/lib/flatConsumption";
+import { fetchDailySeries, fetchFlatRange, hasReading } from "@/lib/flatConsumption";
+
+// A same-month-average estimate needs one upstream call per day in the
+// period (see fetchDailySeries — the daily endpoint has no range variant).
+// Capped well above any real billing cycle so a huge custom range can't
+// turn one report into 100+ calls; beyond this, incomplete rows just show
+// without an estimate.
+const MAX_ESTIMATE_DAYS = 62;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +101,10 @@ export async function GET(req: NextRequest) {
         breakdown,
         fixedCharge,
         amount,
+        estimatedLitres: null as number | null,
+        estimatedAmount: null as number | null,
+        estimatedMeters: [] as { deviceKey: string; litres: number; daysUsed: number }[],
+        fullyEstimated: false,
       };
     });
 
@@ -106,6 +118,38 @@ export async function GET(req: NextRequest) {
     const totalAmount =
       Math.round(rows.reduce((a, r) => a + r.amount, 0) * 100) / 100;
     const incompleteCount = rows.filter((r) => !r.complete).length;
+
+    const totalDays =
+      Math.round(
+        (new Date(`${to}T00:00:00Z`).getTime() -
+          new Date(`${from}T00:00:00Z`).getTime()) /
+          86400000
+      ) + 1;
+
+    if (incompleteCount > 0 && totalDays <= MAX_ESTIMATE_DAYS) {
+      try {
+        const dailySeries = await fetchDailySeries(from, to, creds);
+        for (const row of rows) {
+          if (row.complete) continue;
+          const est = estimateFlatConsumption(
+            row,
+            dailySeries,
+            totalDays,
+            slabs,
+            fixedCharge
+          );
+          if (est) {
+            row.estimatedLitres = est.litres;
+            row.estimatedAmount = est.amount;
+            row.estimatedMeters = est.meters;
+            row.fullyEstimated = est.fullyEstimated;
+          }
+        }
+      } catch (err) {
+        // Non-fatal — the report still has real numbers, just no estimate.
+        console.error("billing report: same-month estimate failed", err);
+      }
+    }
 
     return NextResponse.json({
       period,

@@ -98,6 +98,70 @@ export function resolveFlatConsumption(
   return { litres, complete, meters, overlapCorrectionPaused: true };
 }
 
+export interface MeterEstimate {
+  deviceKey: string;
+  litres: number;
+  daysUsed: number;
+}
+
+export interface EstimatedConsumption {
+  litres: number;
+  amount: number;
+  meters: MeterEstimate[];
+  /** True only when every meter missing a reading got an estimate — a row
+   *  can still be partially estimated if some other meter had zero days of
+   *  data anywhere in the period to average from. */
+  fullyEstimated: boolean;
+}
+
+/**
+ * Fill in a flat's meters that have no reading at all for the billed period
+ * using that SAME meter's own average daily usage on whatever days within
+ * the SAME period it did report — scaled up to the full period length.
+ * Deliberately doesn't reach into other months or other meters: it's a
+ * best-guess placeholder shown alongside the real (incomplete) bill, not a
+ * substitute for one, so it only uses data that's actually about this meter
+ * in this billing period.
+ *
+ * Returns null when there's nothing to estimate (the flat is already
+ * complete) or nothing CAN be estimated (a missing meter has zero days of
+ * data anywhere in the period — e.g. it was down the entire month).
+ */
+export function estimateFlatConsumption(
+  resolved: { complete: boolean; meters: FlatConsumptionMeter[] },
+  dailySeries: Map<string, Map<string, number>>,
+  totalDaysInPeriod: number,
+  slabs: Slab[],
+  fixedCharge: number
+): EstimatedConsumption | null {
+  if (resolved.complete) return null;
+
+  const missing = resolved.meters.filter((m) => m.consumptionLitres == null);
+  if (missing.length === 0) return null;
+
+  let litres = resolved.meters.reduce((a, m) => a + (m.consumptionLitres ?? 0), 0);
+  const meters: MeterEstimate[] = [];
+  let fullyEstimated = true;
+
+  for (const m of missing) {
+    const days = dailySeries.get(m.deviceKey);
+    if (!days || days.size === 0) {
+      fullyEstimated = false;
+      continue;
+    }
+    const values = Array.from(days.values());
+    const avgPerDay = values.reduce((a, v) => a + v, 0) / values.length;
+    const estLitres = avgPerDay * totalDaysInPeriod;
+    litres += estLitres;
+    meters.push({ deviceKey: m.deviceKey, litres: estLitres, daysUsed: values.length });
+  }
+
+  if (meters.length === 0) return null;
+
+  const { amount } = applySlabs(litres, slabs, fixedCharge);
+  return { litres, amount, meters, fullyEstimated };
+}
+
 /**
  * Resolve a "billing month" + cycle start day into the actual [from, to]
  * calendar dates the bill covers (both inclusive, YYYY-MM-DD).
