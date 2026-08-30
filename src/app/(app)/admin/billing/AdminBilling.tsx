@@ -882,6 +882,22 @@ export function AdminBilling() {
     [estimateAmount]
   );
 
+  /** Best-guess grand total across the visible rows: each row's own estimate
+   *  where it has one, else its real (already-final) amount — so a filtered
+   *  or full list always totals to "what we'd expect to collect", not just
+   *  the sum of whatever's actually settled so far. Null when nothing in
+   *  the list has an estimate, so the footer doesn't show a redundant
+   *  second number identical to the real total. */
+  const estimatedGrandTotal = React.useMemo(() => {
+    let anyEstimated = false;
+    const total = filtered.reduce((sum, r) => {
+      const est = displayEstimate(r);
+      if (est) anyEstimated = true;
+      return sum + (est ? est.amount : r.amount);
+    }, 0);
+    return anyEstimated ? total : null;
+  }, [filtered, displayEstimate]);
+
   return (
     <div className="space-y-4">
       <TariffEditor
@@ -1270,7 +1286,14 @@ export function AdminBilling() {
                       <td className="px-5 py-3">Total</td>
                       <td className="px-5 py-3" />
                       <td className="tabular px-5 py-3">{litres(filteredTotals.totalLitres)}</td>
-                      <td className="tabular px-5 py-3">{rupees(filteredTotals.totalAmount)}</td>
+                      <td className="tabular px-5 py-3">
+                        {rupees(filteredTotals.totalAmount)}
+                        {estimatedGrandTotal !== null && (
+                          <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">
+                            Est. {rupees(estimatedGrandTotal)}
+                          </p>
+                        )}
+                      </td>
                       <td className="print:hidden" />
                     </tr>
                   </tfoot>
@@ -1329,7 +1352,14 @@ export function AdminBilling() {
                 })}
                 <li className="flex items-center justify-between px-4 py-3 font-semibold">
                   <span>Total</span>
-                  <span className="tabular">{rupees(filteredTotals.totalAmount)}</span>
+                  <span className="tabular text-right">
+                    {rupees(filteredTotals.totalAmount)}
+                    {estimatedGrandTotal !== null && (
+                      <p className="text-[11px] font-normal text-muted-foreground">
+                        Est. {rupees(estimatedGrandTotal)}
+                      </p>
+                    )}
+                  </span>
                 </li>
               </ul>
             </Card>
