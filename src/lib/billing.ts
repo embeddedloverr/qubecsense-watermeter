@@ -1,7 +1,7 @@
 // `import type` only — erased at compile time, so this file (imported both
 // client-side for the lazy PDF share button and server-side in the billing
 // routes) never actually pulls flatConsumptionTypes.ts's runtime code in.
-import type { FlatConsumptionMeter } from "./flatConsumptionTypes";
+import type { FlatConsumptionMeter, FlatMonthlyEntry } from "./flatConsumptionTypes";
 
 /**
  * Flats whose shared-plumbing correction (see nudron-dashboard's
@@ -160,6 +160,42 @@ export function estimateFlatConsumption(
 
   const { amount } = applySlabs(litres, slabs, fixedCharge);
   return { litres, amount, meters, fullyEstimated };
+}
+
+export interface MonthlyHistoryPoint {
+  month: string;
+  litres: number | null;
+  complete: boolean;
+  /** True for the current, still-running month — its figures will keep
+   *  changing, unlike a closed month. */
+  isPartialMonth: boolean;
+  meters: FlatConsumptionMeter[];
+}
+
+/**
+ * Map raw per-month fetch results (see fetchMonthlyHistory) through
+ * resolveFlatConsumption, so a month in a history view — the admin
+ * Residents page's History panel, the resident's own monthly chart — is
+ * priced the exact same way that month was actually billed, including a
+ * paused-overlap flat's raw-reading fallback.
+ */
+export function resolveMonthlyHistory(
+  flat: string,
+  history: { month: string; entry: FlatMonthlyEntry | null }[]
+): MonthlyHistoryPoint[] {
+  return history.map(({ month, entry }) => {
+    if (!entry) {
+      return { month, litres: null, complete: false, isPartialMonth: false, meters: [] };
+    }
+    const resolved = resolveFlatConsumption(flat, entry);
+    return {
+      month,
+      litres: resolved.litres,
+      complete: resolved.complete,
+      isPartialMonth: entry.isPartialMonth,
+      meters: resolved.meters,
+    };
+  });
 }
 
 /**

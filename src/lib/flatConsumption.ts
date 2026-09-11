@@ -87,6 +87,44 @@ export function fetchFlatRange(
   return callFlatConsumption("/api/v1/flat-consumption/range", opts, creds);
 }
 
+/** How many months back the monthly-history views (admin Residents panel,
+ *  the resident's own monthly chart) look — one shared constant so they
+ *  can't quietly drift apart. */
+export const HISTORY_MONTHS = 6;
+
+/** Calendar months as "YYYY-MM", oldest first, ending at the current month. */
+export function lastNMonths(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+/**
+ * One flat's consumption for each of `months`, one upstream call per month
+ * in parallel — flat-consumption/monthly has no multi-month variant, so
+ * this is the shared way both the admin History panel and the resident's
+ * own monthly chart pull the same several-months view. A month that fails
+ * to fetch comes back with `entry: null` rather than throwing, so one bad
+ * month doesn't blank the whole history.
+ */
+export async function fetchMonthlyHistory(
+  flat: string,
+  months: string[],
+  creds: LiveDataCreds
+): Promise<{ month: string; entry: FlatMonthlyEntry | null }[]> {
+  const fetched = await Promise.all(
+    months.map((month) => fetchFlatMonthly({ month, flat }, creds).catch(() => null))
+  );
+  return months.map((month, i) => ({
+    month,
+    entry: fetched[i]?.flats.find((f) => f.flat === flat) || null,
+  }));
+}
+
 function eachDateInclusive(from: string, to: string): string[] {
   const dates: string[] = [];
   let cur = new Date(`${from}T00:00:00Z`).getTime();

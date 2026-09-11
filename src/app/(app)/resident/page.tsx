@@ -10,11 +10,18 @@ import {
   type LiveDataCreds,
   type LiveFlat,
 } from "@/lib/liveData";
-import { fetchFlatRange } from "@/lib/flatConsumption";
+import {
+  fetchFlatRange,
+  fetchMonthlyHistory,
+  lastNMonths,
+  HISTORY_MONTHS,
+} from "@/lib/flatConsumption";
 import {
   applySlabs,
   resolveBillingPeriod,
   resolveFlatConsumption,
+  resolveMonthlyHistory,
+  type MonthlyHistoryPoint,
   type Slab,
 } from "@/lib/billing";
 import { usageInPeriod, periodRange, type BudgetPeriod } from "@/lib/budget";
@@ -118,6 +125,24 @@ export default async function ResidentHome() {
   }
   const bill = applySlabs(monthLitres, slabs, fixedCharge);
 
+  // Last several months, for the monthly trend chart — same totalizer-delta
+  // + correction-aware source as the "this month" figure above, via the
+  // shared fetchMonthlyHistory/resolveMonthlyHistory helpers also used by
+  // the admin Residents page's History panel.
+  let monthlyHistory: MonthlyHistoryPoint[] = [];
+  if (creds && flatNumber) {
+    try {
+      const history = await fetchMonthlyHistory(
+        flatNumber,
+        lastNMonths(HISTORY_MONTHS),
+        creds
+      );
+      monthlyHistory = resolveMonthlyHistory(flatNumber, history);
+    } catch {
+      // Chart section just won't render — the rest of the page still works.
+    }
+  }
+
   // Usage this week / month for the budget widget.
   const flatReadings = flat
     ? flat.meters.flatMap((m) =>
@@ -218,6 +243,7 @@ export default async function ResidentHome() {
           month={month}
           monthLitres={monthLitres}
           monthComplete={monthComplete}
+          monthlyHistory={monthlyHistory}
           billAmount={bill.amount}
           breakdown={bill.breakdown}
           fixedCharge={fixedCharge}

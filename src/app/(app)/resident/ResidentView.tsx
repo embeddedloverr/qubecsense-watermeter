@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   CartesianGrid,
 } from "recharts";
 import {
@@ -36,6 +37,7 @@ import {
   AttachmentThumb,
 } from "@/components/ChatAttachment";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
+import type { MonthlyHistoryPoint } from "@/lib/billing";
 
 interface SlabCharge {
   litres: number;
@@ -56,6 +58,19 @@ function monthLabel(m: string): string {
 
 const PRIMARY = "hsl(201 96% 38%)";
 const SECONDARY = "hsl(187 72% 40%)";
+const MONTHLY_CHART_COLORS = [
+  PRIMARY,
+  SECONDARY,
+  "hsl(35 90% 55%)",
+  "hsl(var(--muted-foreground))",
+];
+
+function monthShortLabel(m: string): string {
+  return new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "2-digit",
+  });
+}
 
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
@@ -534,6 +549,7 @@ export function ResidentView({
   month,
   monthLitres,
   monthComplete,
+  monthlyHistory,
   billAmount,
   breakdown,
   fixedCharge,
@@ -549,6 +565,9 @@ export function ResidentView({
   /** False when a meter has no reading at all for this period yet — the
    *  figures above may still change more than usual once it reports. */
   monthComplete: boolean;
+  /** Last several calendar months, oldest first, for the monthly trend
+   *  chart. Empty when the totalizer-delta source couldn't be reached. */
+  monthlyHistory: MonthlyHistoryPoint[];
   billAmount: number;
   breakdown: SlabCharge[];
   fixedCharge: number;
@@ -603,6 +622,28 @@ export function ResidentView({
     };
   });
   const hasOther = chartData.some((d) => d.Other > 0);
+
+  // Monthly trend chart — one stacked series per meter location, built
+  // generically from whatever locations actually appear (not hardcoded
+  // Kitchen/Bathroom, since a flat's meters can be named anything).
+  const monthlyLocations: string[] = [];
+  for (const m of monthlyHistory) {
+    for (const meter of m.meters) {
+      const loc = meter.location || "Meter";
+      if (!monthlyLocations.includes(loc)) monthlyLocations.push(loc);
+    }
+  }
+  const monthlyChartData = monthlyHistory.map((m) => {
+    const row: Record<string, string | number> = { label: monthShortLabel(m.month) };
+    for (const loc of monthlyLocations) row[loc] = 0;
+    for (const meter of m.meters) {
+      if (meter.consumptionLitres == null) continue;
+      const loc = meter.location || "Meter";
+      row[loc] = (row[loc] as number) + meter.consumptionLitres;
+    }
+    return row;
+  });
+  const latestMonth = monthlyHistory[monthlyHistory.length - 1];
 
   let from = 0;
 
@@ -709,6 +750,62 @@ export function ResidentView({
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      {/* Monthly chart */}
+      {monthlyChartData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Monthly consumption</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={monthlyChartData}
+                margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="hsl(var(--border))"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  content={<ChartTooltip />}
+                  cursor={{ fill: "hsl(var(--muted))" }}
+                />
+                {monthlyLocations.length > 1 && (
+                  <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+                )}
+                {monthlyLocations.map((loc, i) => (
+                  <Bar
+                    key={loc}
+                    dataKey={loc}
+                    stackId="a"
+                    fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                    radius={i === monthlyLocations.length - 1 ? [3, 3, 0, 0] : undefined}
+                    maxBarSize={26}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+            {latestMonth?.isPartialMonth && (
+              <p className="mt-1 text-center text-xs text-muted-foreground">
+                The most recent bar is this month, still in progress.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Bill breakdown */}
       {tariffConfigured && (
