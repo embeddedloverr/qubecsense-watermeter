@@ -72,6 +72,26 @@ function monthShortLabel(m: string): string {
   });
 }
 
+function MonthlyChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((a: number, p: any) => a + (p.value || 0), 0);
+  return (
+    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
+      <p className="font-medium text-foreground">{label}</p>
+      {payload.map((p: any) => (
+        <p key={p.dataKey} className="text-muted-foreground">
+          {p.name}: {Math.round(p.value).toLocaleString("en-IN")} L
+        </p>
+      ))}
+      {payload.length > 1 && (
+        <p className="mt-0.5 border-t border-border pt-0.5 font-medium text-foreground">
+          Total: {Math.round(total).toLocaleString("en-IN")} L
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -780,7 +800,7 @@ export function ResidentView({
                   axisLine={false}
                 />
                 <Tooltip
-                  content={<ChartTooltip />}
+                  content={<MonthlyChartTooltip />}
                   cursor={{ fill: "hsl(var(--muted))" }}
                 />
                 {monthlyLocations.length > 1 && (
