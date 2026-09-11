@@ -16,9 +16,20 @@ import {
   IconUsers,
   IconCheckCircle,
   IconPen,
+  IconDroplet,
 } from "@/components/icons";
 import { useToast } from "@/components/Toast";
 import { formatDateTime } from "@/lib/utils";
+import { ANOMALY_LABEL, type FlatConsumptionMeter } from "@/lib/flatConsumptionTypes";
+
+const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;
+
+function monthLabel(m: string): string {
+  return new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+}
 
 interface Resident {
   id: string;
@@ -65,6 +76,7 @@ export function AdminResidents() {
     password: string;
   } | null>(null);
   const [editing, setEditing] = React.useState<Resident | null>(null);
+  const [historyFor, setHistoryFor] = React.useState<Resident | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [sendingGuide, setSendingGuide] = React.useState(false);
 
@@ -376,6 +388,13 @@ export function AdminResidents() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => setHistoryFor(r)}
+                        >
+                          History
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           disabled={busyId === r.id}
                           onClick={() => resetPassword(r)}
                         >
@@ -451,7 +470,10 @@ export function AdminResidents() {
                   </div>
                   <StatusBadge resident={r} />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setHistoryFor(r)}>
+                    History
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -498,6 +520,158 @@ export function AdminResidents() {
           }}
         />
       )}
+
+      {historyFor && (
+        <HistoryModal resident={historyFor} onClose={() => setHistoryFor(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------- Meter history ------------------------------- */
+
+interface MonthHistory {
+  month: string;
+  litres: number | null;
+  complete: boolean;
+  isPartialMonth: boolean;
+  meters: FlatConsumptionMeter[];
+}
+
+function HistoryModal({
+  resident,
+  onClose,
+}: {
+  resident: Resident;
+  onClose: () => void;
+}) {
+  const [data, setData] = React.useState<{ months: MonthHistory[] } | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/residents/${resident.id}/history`, {
+          cache: "no-store",
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error || "Could not load meter history.");
+        if (!cancelled) setData(body);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Could not load meter history.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resident.id]);
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-card shadow-xl animate-fade-in sm:rounded-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-5 py-3.5">
+          <div>
+            <h2 className="tabular text-lg font-bold text-foreground">
+              Flat {resident.flatNumber}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {resident.name || "—"} · Meter history
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+          >
+            <IconX className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-5">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Spinner className="h-5 w-5" /> Loading meter history…
+            </div>
+          ) : error ? (
+            <div className="space-y-2 py-6 text-center">
+              <IconAlert className="mx-auto h-6 w-6 text-destructive" />
+              <p className="text-sm text-muted-foreground">{error}</p>
+            </div>
+          ) : !data || data.months.every((m) => m.litres === null) ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No meter readings found for this flat in the last 6 months.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {[...data.months].reverse().map((m, i) => {
+                const isOpen = expanded === m.month;
+                return (
+                  <li key={m.month} className="rounded-lg border border-border">
+                    <button
+                      onClick={() => setExpanded(isOpen ? null : m.month)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-foreground">
+                          {monthLabel(m.month)}
+                        </span>
+                        {i === 0 && m.isPartialMonth && (
+                          <Badge tone="neutral">So far</Badge>
+                        )}
+                        {!m.complete && <Badge tone="warning">Incomplete</Badge>}
+                      </div>
+                      <span className="tabular text-sm text-muted-foreground">
+                        {m.litres !== null ? litres(m.litres) : "No data"}
+                      </span>
+                    </button>
+                    {isOpen && m.meters.length > 0 && (
+                      <ul className="space-y-1.5 border-t border-border px-3 py-2.5">
+                        {m.meters.map((meter) => (
+                          <li
+                            key={meter.deviceKey}
+                            className="flex items-center justify-between text-xs text-muted-foreground"
+                          >
+                            <span className="flex items-center gap-1">
+                              <IconDroplet className="h-3 w-3 shrink-0" />
+                              {meter.location || "Meter"}
+                            </span>
+                            {meter.anomaly ? (
+                              <span className="text-destructive">
+                                {ANOMALY_LABEL[meter.anomaly] || meter.anomaly}
+                              </span>
+                            ) : (
+                              <span className="tabular">
+                                {meter.consumptionLitres !== null
+                                  ? litres(meter.consumptionLitres)
+                                  : "—"}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
