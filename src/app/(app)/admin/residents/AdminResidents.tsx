@@ -18,17 +18,61 @@ import {
   IconPen,
   IconDroplet,
 } from "@/components/icons";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  CartesianGrid,
+} from "recharts";
 import { useToast } from "@/components/Toast";
 import { formatDateTime } from "@/lib/utils";
 import { ANOMALY_LABEL, type FlatConsumptionMeter } from "@/lib/flatConsumptionTypes";
 
 const litres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} L`;
 
+const CHART_COLORS = [
+  "hsl(201 96% 38%)",
+  "hsl(187 72% 40%)",
+  "hsl(35 90% 55%)",
+  "hsl(var(--muted-foreground))",
+];
+
 function monthLabel(m: string): string {
   return new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", {
     month: "long",
     year: "numeric",
   });
+}
+
+function monthShortLabel(m: string): string {
+  return new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "2-digit",
+  });
+}
+
+function HistoryChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((a: number, p: any) => a + (p.value || 0), 0);
+  return (
+    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
+      <p className="font-medium text-foreground">{label}</p>
+      {payload.map((p: any) => (
+        <p key={p.dataKey} className="text-muted-foreground">
+          {p.name}: {Math.round(p.value).toLocaleString("en-IN")} L
+        </p>
+      ))}
+      {payload.length > 1 && (
+        <p className="mt-0.5 border-t border-border pt-0.5 font-medium text-foreground">
+          Total: {Math.round(total).toLocaleString("en-IN")} L
+        </p>
+      )}
+    </div>
+  );
 }
 
 interface Resident {
@@ -550,6 +594,38 @@ function HistoryModal({
   const [error, setError] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<string | null>(null);
 
+  // One stacked series per meter location, in the order first seen —
+  // generic rather than hardcoded Kitchen/Bathroom, since a flat's meters
+  // can be named anything.
+  const locations = React.useMemo(() => {
+    if (!data) return [];
+    const order: string[] = [];
+    for (const m of data.months) {
+      for (const meter of m.meters) {
+        const loc = meter.location || "Meter";
+        if (!order.includes(loc)) order.push(loc);
+      }
+    }
+    return order;
+  }, [data]);
+
+  const chartData = React.useMemo(() => {
+    if (!data) return [];
+    return data.months.map((m, i) => {
+      const row: Record<string, string | number | boolean> = {
+        label: monthShortLabel(m.month),
+        isPartial: i === data.months.length - 1 && m.isPartialMonth,
+      };
+      for (const loc of locations) row[loc] = 0;
+      for (const meter of m.meters) {
+        if (meter.consumptionLitres == null) continue;
+        const loc = meter.location || "Meter";
+        row[loc] = (row[loc] as number) + meter.consumptionLitres;
+      }
+      return row;
+    });
+  }, [data, locations]);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
@@ -583,7 +659,7 @@ function HistoryModal({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-card shadow-xl animate-fade-in sm:rounded-2xl">
+      <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-border bg-card shadow-xl animate-fade-in sm:rounded-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-5 py-3.5">
           <div>
             <h2 className="tabular text-lg font-bold text-foreground">
@@ -617,7 +693,60 @@ function HistoryModal({
               No meter readings found for this flat in the last 6 months.
             </p>
           ) : (
-            <ul className="space-y-2">
+            <>
+              <div className="mb-4 rounded-lg border border-border p-3">
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 4, right: 8, left: -18, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="hsl(var(--border))"
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <Tooltip
+                      content={<HistoryChartTooltip />}
+                      cursor={{ fill: "hsl(var(--muted))" }}
+                    />
+                    {locations.length > 1 && (
+                      <Legend
+                        wrapperStyle={{ fontSize: 11 }}
+                        iconType="circle"
+                        iconSize={8}
+                      />
+                    )}
+                    {locations.map((loc, i) => (
+                      <Bar
+                        key={loc}
+                        dataKey={loc}
+                        stackId="a"
+                        fill={CHART_COLORS[i % CHART_COLORS.length]}
+                        radius={i === locations.length - 1 ? [3, 3, 0, 0] : undefined}
+                        maxBarSize={28}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+                {data.months[data.months.length - 1]?.isPartialMonth && (
+                  <p className="mt-1 text-center text-[11px] text-muted-foreground">
+                    The most recent bar is the current month, still in progress.
+                  </p>
+                )}
+              </div>
+
+              <ul className="space-y-2">
               {[...data.months].reverse().map((m, i) => {
                 const isOpen = expanded === m.month;
                 return (
@@ -668,7 +797,8 @@ function HistoryModal({
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+            </>
           )}
         </div>
       </div>
