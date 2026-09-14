@@ -14,6 +14,7 @@
 import { LiveDataError, type LiveDataCreds } from "./liveData";
 import type {
   FlatConsumptionEntry,
+  FlatConsumptionMeter,
   FlatDailyEntry,
   FlatMonthlyEntry,
 } from "./flatConsumptionTypes";
@@ -175,4 +176,28 @@ export async function fetchDailySeries(
     }
   });
   return series;
+}
+
+/**
+ * One flat's per-day, per-meter consumption across [from, to] — one
+ * upstream call per day in parallel, scoped to a single flat via the daily
+ * endpoint's own `flat` filter so the response (and this call's cost)
+ * stays proportional to one flat, not the whole site. Used for a chosen
+ * month's day-by-day chart, e.g. on a resident's own dashboard. A day that
+ * fails to fetch comes back as an empty-meters entry rather than throwing.
+ */
+export async function fetchFlatDailyRange(
+  flat: string,
+  from: string,
+  to: string,
+  creds: LiveDataCreds
+): Promise<{ date: string; meters: FlatConsumptionMeter[] }[]> {
+  const dates = eachDateInclusive(from, to);
+  const days = await Promise.all(
+    dates.map((date) => fetchFlatDaily({ date, flat }, creds).catch(() => null))
+  );
+  return dates.map((date, i) => ({
+    date,
+    meters: days[i]?.flats.find((f) => f.flat === flat)?.meters || [],
+  }));
 }

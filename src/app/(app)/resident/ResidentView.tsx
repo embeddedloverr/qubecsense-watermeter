@@ -18,6 +18,7 @@ import {
   CardTitle,
   Button,
   Input,
+  Select,
   Textarea,
   Spinner,
 } from "@/components/ui";
@@ -38,6 +39,7 @@ import {
 } from "@/components/ChatAttachment";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
 import type { MonthlyHistoryPoint } from "@/lib/billing";
+import type { FlatConsumptionMeter } from "@/lib/flatConsumptionTypes";
 
 interface SlabCharge {
   litres: number;
@@ -602,6 +604,46 @@ export function ResidentView({
     lastWeekSame: number | null;
   } | null;
 }) {
+  // Month-picker daily chart: separate from the rolling-32-day chart below
+  // (that one is server-fetched up front, no request needed) — this one
+  // fetches only when a resident actually asks for a specific calendar
+  // month's day-by-day breakdown. Hooks have to sit before the early return
+  // below so they run on every render, not just the ones with meter data.
+  const monthOptions = monthlyHistory.map((m) => m.month);
+  const [dailyMonth, setDailyMonth] = React.useState<string>(
+    () => monthOptions[monthOptions.length - 1] || ""
+  );
+  const [dailyDays, setDailyDays] = React.useState<
+    { date: string; meters: FlatConsumptionMeter[] }[] | null
+  >(null);
+  const [dailyLoading, setDailyLoading] = React.useState(false);
+  const [dailyError, setDailyError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!dailyMonth) return;
+    let cancelled = false;
+    setDailyLoading(true);
+    setDailyError(null);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/resident/daily-history?month=${dailyMonth}`,
+          { cache: "no-store" }
+        );
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error || "Could not load daily consumption.");
+        if (!cancelled) setDailyDays(body.days);
+      } catch (e: any) {
+        if (!cancelled) setDailyError(e?.message || "Could not load daily consumption.");
+      } finally {
+        if (!cancelled) setDailyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dailyMonth]);
+
   if (!flat || flat.meters.length === 0) {
     // Still show the chat. A resident with no readings is precisely the one
     // who needs to tell someone — previously this early return replaced the
@@ -664,6 +706,34 @@ export function ResidentView({
     return row;
   });
   const latestMonth = monthlyHistory[monthlyHistory.length - 1];
+
+  // Day-by-day chart for the picked month, from the fetched `dailyDays` —
+  // same generic per-location approach as the monthly chart above.
+  const dailyMonthLocations: string[] = [];
+  for (const d of dailyDays || []) {
+    for (const meter of d.meters) {
+      const loc = meter.location || "Meter";
+      if (!dailyMonthLocations.includes(loc)) dailyMonthLocations.push(loc);
+    }
+  }
+  const dailyMonthChartData = (dailyDays || []).map((d) => {
+    const row: Record<string, string | number> = {
+      label: new Date(`${d.date}T00:00:00`).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+      }),
+    };
+    for (const loc of dailyMonthLocations) row[loc] = 0;
+    for (const meter of d.meters) {
+      if (meter.consumptionLitres == null) continue;
+      const loc = meter.location || "Meter";
+      row[loc] = (row[loc] as number) + meter.consumptionLitres;
+    }
+    return row;
+  });
+  const dailyMonthHasData = dailyMonthChartData.some((d) =>
+    dailyMonthLocations.some((loc) => (d[loc] as number) > 0)
+  );
 
   let from = 0;
 
@@ -822,6 +892,82 @@ export function ResidentView({
               <p className="mt-1 text-center text-xs text-muted-foreground">
                 The most recent bar is this month, still in progress.
               </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Daily consumption for a chosen month */}
+      {monthOptions.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+            <CardTitle>Daily consumption by month</CardTitle>
+            <Select
+              value={dailyMonth}
+              onChange={(e) => setDailyMonth(e.target.value)}
+              className="h-9 w-auto text-sm"
+              aria-label="Choose a month"
+            >
+              {[...monthOptions].reverse().map((m) => (
+                <option key={m} value={m}>
+                  {monthLabel(m)}
+                </option>
+              ))}
+            </Select>
+          </CardHeader>
+          <CardContent>
+            {dailyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <Spinner className="h-5 w-5" /> Loading…
+              </div>
+            ) : dailyError ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">{dailyError}</p>
+            ) : !dailyMonthHasData ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No day-wise data for {monthLabel(dailyMonth)}.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart
+                  data={dailyMonthChartData}
+                  margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(var(--border))"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    content={<MonthlyChartTooltip />}
+                    cursor={{ fill: "hsl(var(--muted))" }}
+                  />
+                  {dailyMonthLocations.length > 1 && (
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+                  )}
+                  {dailyMonthLocations.map((loc, i) => (
+                    <Bar
+                      key={loc}
+                      dataKey={loc}
+                      stackId="a"
+                      fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                      radius={i === dailyMonthLocations.length - 1 ? [3, 3, 0, 0] : undefined}
+                      maxBarSize={16}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
             )}
           </CardContent>
         </Card>
