@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
+import { dismissedDeviceIdSet } from "@/lib/models/DismissedMeter";
 import { guard } from "@/lib/guard";
 import { fetchLiveData, LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 
@@ -50,6 +51,30 @@ export async function GET(req: NextRequest) {
       } catch (err) {
         // Owner names are a nice-to-have; still serve meter data if the DB is down.
         console.error("live-data owner join error", err);
+      }
+    }
+
+    // Drop devices this site has dismissed from Unassigned (decommissioned/
+    // replaced meters that keep showing up because they once reported
+    // upstream but were never mapped to a flat) — meterCount comes down
+    // with them so the KPI totals stay consistent with what's actually
+    // listed.
+    if (Array.isArray(body?.unassigned) && body.unassigned.length) {
+      try {
+        await connectDB();
+        const dismissed = await dismissedDeviceIdSet(g.ctx.siteId);
+        if (dismissed.size) {
+          const before = body.unassigned.length;
+          body.unassigned = body.unassigned.filter(
+            (m: any) => !dismissed.has(m.deviceId)
+          );
+          const removed = before - body.unassigned.length;
+          if (removed && typeof body.meterCount === "number") {
+            body.meterCount -= removed;
+          }
+        }
+      } catch (err) {
+        console.error("live-data dismissed-filter error", err);
       }
     }
 

@@ -35,6 +35,7 @@ import {
   IconCheckCircle,
 } from "@/components/icons";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { useToast } from "@/components/Toast";
 import { ExportDialog } from "./ExportDialog";
 
 /* ----------------------------- API response types ---------------------------- */
@@ -466,9 +467,11 @@ interface SilentMeter {
 
 /** Meters that were reporting but have stopped — flat batteries, lost signal. */
 function SilentMeters() {
+  const { toast } = useToast();
   const [silent, setSilent] = React.useState<SilentMeter[] | null>(null);
   const [latestDate, setLatestDate] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState(false);
+  const [dismissing, setDismissing] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -484,6 +487,30 @@ function SilentMeters() {
       cancelled = true;
     };
   }, []);
+
+  // Only a genuinely-unassigned device can be dismissed here — a flat's own
+  // silent meter is a real problem someone needs to see, not clutter.
+  const dismissMeter = async (deviceId: string) => {
+    setDismissing(deviceId);
+    try {
+      const res = await fetch("/api/live-data/dismissed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        toast(body.error || "Could not dismiss that meter.", "error");
+        return;
+      }
+      setSilent((prev) => (prev ? prev.filter((m) => m.deviceId !== deviceId) : prev));
+      toast(`Meter ${deviceId} dismissed.`, "success");
+    } catch {
+      toast("Network error. Please try again.", "error");
+    } finally {
+      setDismissing(null);
+    }
+  };
 
   if (!silent || silent.length === 0) return null;
 
@@ -529,6 +556,15 @@ function SilentMeters() {
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Last {formatDate(m.lastSeen)}
                 </p>
+                {m.flat === null && (
+                  <button
+                    onClick={() => dismissMeter(m.deviceId)}
+                    disabled={dismissing === m.deviceId}
+                    className="mt-0.5 text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                  >
+                    Dismiss
+                  </button>
+                )}
               </div>
             </li>
           ))}
@@ -589,7 +625,9 @@ function StatCard({
 const REFRESH_MS = 60_000;
 
 export function AdminLiveData() {
+  const { toast } = useToast();
   const [data, setData] = React.useState<LiveData | null>(null);
+  const [dismissing, setDismissing] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -628,6 +666,40 @@ export function AdminLiveData() {
     setLoading(true);
     load();
   }, [load]);
+
+  /** Hides a stale/decommissioned unassigned device from this site's Live
+   *  Data views. Updates local state directly (mirrors exactly what the
+   *  server would filter) rather than a full refetch, so the row disappears
+   *  immediately. */
+  const dismissMeter = async (deviceId: string) => {
+    setDismissing(deviceId);
+    try {
+      const res = await fetch("/api/live-data/dismissed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        toast(body.error || "Could not dismiss that meter.", "error");
+        return;
+      }
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              unassigned: prev.unassigned.filter((m) => m.deviceId !== deviceId),
+              meterCount: prev.meterCount - 1,
+            }
+          : prev
+      );
+      toast(`Meter ${deviceId} dismissed.`, "success");
+    } catch {
+      toast("Network error. Please try again.", "error");
+    } finally {
+      setDismissing(null);
+    }
+  };
 
   // Silent auto-refresh so the page stays "live".
   React.useEffect(() => {
@@ -1301,6 +1373,14 @@ export function AdminLiveData() {
                       {flags.slice(0, 2).map((fl) => (
                         <FlagBadge key={fl} flag={fl} />
                       ))}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={dismissing === m.deviceId}
+                        onClick={() => dismissMeter(m.deviceId)}
+                      >
+                        Dismiss
+                      </Button>
                     </div>
                   </li>
                 );

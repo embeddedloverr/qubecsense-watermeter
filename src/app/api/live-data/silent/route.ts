@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/guard";
 import { connectDB } from "@/lib/db";
 import { Flat } from "@/lib/models/Flat";
+import { dismissedDeviceIdSet } from "@/lib/models/DismissedMeter";
 import {
   fetchLiveData,
   LiveDataError,
@@ -72,15 +73,19 @@ export async function GET(req: NextRequest) {
     for (const f of data.flats) for (const m of f.meters) consider(f.flat, m);
     for (const m of data.unassigned) consider(null, m);
 
-    silent.sort((a, b) => b.daysSince - a.daysSince);
-
-    // Attach owner names so the admin knows who to contact.
+    // Attach owner names, and drop devices this site has dismissed as
+    // Unassigned (a real flat's silent meter is never dismissable this way —
+    // only genuinely-unassigned devices ever end up in the dismissed set).
+    let filtered = silent;
     try {
       await connectDB();
-      const flats = await Flat.find(
-        { siteId: g.ctx.siteId },
-        { flatNumber: 1, ownerName: 1, ownerPhone: 1 }
-      ).lean();
+      const [flats, dismissed] = await Promise.all([
+        Flat.find(
+          { siteId: g.ctx.siteId },
+          { flatNumber: 1, ownerName: 1, ownerPhone: 1 }
+        ).lean(),
+        dismissedDeviceIdSet(g.ctx.siteId),
+      ]);
       const byNumber = new Map(
         (flats as any[]).map((f) => [String(f.flatNumber), f])
       );
@@ -89,16 +94,23 @@ export async function GET(req: NextRequest) {
         s.ownerName = owner?.ownerName || "";
         s.ownerPhone = owner?.ownerPhone || "";
       }
+      if (dismissed.size) {
+        filtered = silent.filter(
+          (s) => !(s.flat === null && dismissed.has(s.deviceId))
+        );
+      }
     } catch (err) {
       console.error("silent meters owner join error", err);
     }
+
+    filtered.sort((a, b) => b.daysSince - a.daysSince);
 
     return NextResponse.json({
       latestDate: latest,
       windowDays,
       reportingMeterCount: data.meterCount,
-      silentCount: silent.length,
-      silent,
+      silentCount: filtered.length,
+      silent: filtered,
     });
   } catch (err) {
     const message =
