@@ -7,6 +7,7 @@ import {
   ComposedChart,
   Line,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -28,7 +29,7 @@ import {
   IconDroplet,
   IconGauge,
   IconRupee,
-  IconChevronRight,
+  IconX,
   IconAlert,
   IconCheckCircle,
 } from "@/components/icons";
@@ -146,205 +147,8 @@ function MonthlyChartTooltip({ active, payload, label }: any) {
   );
 }
 
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
-      <p className="font-medium text-foreground">{label}</p>
-      {payload.map((p: any) => (
-        <p key={p.dataKey} className="text-muted-foreground">
-          {p.name}: {Math.round(p.value).toLocaleString("en-IN")} L
-        </p>
-      ))}
-    </div>
-  );
-}
-
 function latestReading(m: LiveMeter) {
   return m.readings[m.readings.length - 1];
-}
-
-/* --------------------------------- History ---------------------------------- */
-
-interface DayHistory {
-  date: string;
-  total: number;
-  hours: number;
-  buckets: { label: string; Kitchen: number; Bathroom: number; Other: number }[];
-}
-
-/** Per-day breakdown into the meter's intraday buckets (12 × 2 hours). */
-function buildHistory(flat: LiveFlat, dates: string[]): DayHistory[] {
-  const out: DayHistory[] = [];
-
-  // Newest day first.
-  for (const date of [...dates].sort((a, b) => b.localeCompare(a))) {
-    const entries = flat.meters
-      .map((m) => ({ meter: m, reading: m.readings.find((x) => x.date === date) }))
-      .filter((e) => e.reading);
-    if (!entries.length) continue;
-
-    const total = entries.reduce(
-      (a, e) => a + (e.reading?.consumptionLitres || 0),
-      0
-    );
-    const bucketCount = Math.max(
-      ...entries.map((e) => e.reading?.intraday?.length || 0)
-    );
-    if (!bucketCount) continue;
-
-    const hours = 24 / bucketCount;
-    const buckets = Array.from({ length: bucketCount }, (_, i) => {
-      let kitchen = 0;
-      let bathroom = 0;
-      let other = 0;
-      for (const { meter, reading } of entries) {
-        const v = reading?.intraday?.[i] || 0;
-        const loc = (meter.location || "").toLowerCase();
-        if (loc === "kitchen") kitchen += v;
-        else if (loc === "bathroom") bathroom += v;
-        else other += v;
-      }
-      return {
-        label: `${String(Math.round(i * hours)).padStart(2, "0")}:00`,
-        Kitchen: kitchen,
-        Bathroom: bathroom,
-        Other: other,
-      };
-    });
-
-    out.push({ date, total, hours, buckets });
-  }
-
-  return out;
-}
-
-function HistorySection({
-  flat,
-  dates,
-}: {
-  flat: LiveFlat;
-  dates: string[];
-}) {
-  const history = React.useMemo(() => buildHistory(flat, dates), [flat, dates]);
-  // Newest day expanded by default.
-  const [open, setOpen] = React.useState<string | null>(history[0]?.date ?? null);
-
-  if (!history.length) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>History</CardTitle>
-        </CardHeader>
-        <CardContent className="pb-5 pt-0 text-sm text-muted-foreground">
-          No day-wise history yet.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>History</CardTitle>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Tap a day to see usage in {history[0].hours}-hour blocks.
-        </p>
-      </CardHeader>
-      <CardContent className="px-0 pb-0">
-        <ul className="divide-y divide-border border-t border-border">
-          {history.map((day) => {
-            const expanded = open === day.date;
-            const hasOther = day.buckets.some((b) => b.Other > 0);
-            return (
-              <li key={day.date}>
-                <button
-                  onClick={() => setOpen(expanded ? null : day.date)}
-                  aria-expanded={expanded}
-                  className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-muted/40"
-                >
-                  <div className="flex items-center gap-2">
-                    <IconChevronRight
-                      className={`h-4 w-4 text-muted-foreground transition-transform ${
-                        expanded ? "rotate-90" : ""
-                      }`}
-                    />
-                    <span className="text-sm font-medium text-foreground">
-                      {formatDate(day.date)}
-                    </span>
-                  </div>
-                  <span className="tabular text-sm text-muted-foreground">
-                    {litres(day.total)}
-                  </span>
-                </button>
-
-                {expanded && (
-                  <div className="px-3 pb-4">
-                    <ResponsiveContainer width="100%" height={180}>
-                      <BarChart
-                        data={day.buckets}
-                        margin={{ top: 4, right: 8, left: -14, bottom: 0 }}
-                      >
-                        <CartesianGrid
-                          strokeDasharray="3 3"
-                          stroke="hsl(var(--border))"
-                          vertical={false}
-                        />
-                        <XAxis
-                          dataKey="label"
-                          tick={{
-                            fontSize: 10,
-                            fill: "hsl(var(--muted-foreground))",
-                          }}
-                          tickLine={false}
-                          axisLine={false}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis
-                          tick={{
-                            fontSize: 10,
-                            fill: "hsl(var(--muted-foreground))",
-                          }}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <Tooltip
-                          content={<ChartTooltip />}
-                          cursor={{ fill: "hsl(var(--muted))" }}
-                        />
-                        <Bar
-                          dataKey="Kitchen"
-                          stackId="a"
-                          fill={PRIMARY}
-                          maxBarSize={18}
-                        />
-                        <Bar
-                          dataKey="Bathroom"
-                          stackId="a"
-                          fill={SECONDARY}
-                          radius={hasOther ? undefined : [3, 3, 0, 0]}
-                          maxBarSize={18}
-                        />
-                        {hasOther && (
-                          <Bar
-                            dataKey="Other"
-                            stackId="a"
-                            fill="hsl(var(--muted-foreground))"
-                            radius={[3, 3, 0, 0]}
-                            maxBarSize={18}
-                          />
-                        )}
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </CardContent>
-    </Card>
-  );
 }
 
 /* ------------------------------ Recent usage -------------------------------- */
@@ -619,7 +423,6 @@ function BudgetCard({
 
 export function ResidentView({
   flat,
-  dates,
   month,
   monthLitres,
   monthComplete,
@@ -633,7 +436,6 @@ export function ResidentView({
   recent,
 }: {
   flat: LiveFlat | null;
-  dates: string[];
   month: string;
   monthLitres: number;
   /** False when a meter has no reading at all for this period yet — the
@@ -656,11 +458,10 @@ export function ResidentView({
     lastWeekSame: number | null;
   } | null;
 }) {
-  // Month-picker daily chart: separate from the rolling-32-day chart below
-  // (that one is server-fetched up front, no request needed) — this one
-  // fetches only when a resident actually asks for a specific calendar
-  // month's day-by-day breakdown. Hooks have to sit before the early return
-  // below so they run on every render, not just the ones with meter data.
+  // Month-picker daily chart: fetches a calendar month's day-by-day figures
+  // when picked, and a single day's 2-hour blocks when a day is tapped.
+  // Hooks have to sit before the early return below so they run on every
+  // render, not just the ones with meter data.
   const monthOptions = monthlyHistory.map((m) => m.month);
   const [dailyMonth, setDailyMonth] = React.useState<string>(
     () => monthOptions[monthOptions.length - 1] || ""
@@ -698,6 +499,56 @@ export function ResidentView({
     };
   }, [dailyMonth]);
 
+  // The tapped day and its 2-hour blocks. Cached per date so flipping between
+  // days (or re-tapping one) doesn't refetch.
+  const [selectedDay, setSelectedDay] = React.useState<string | null>(null);
+  const [dayMeters, setDayMeters] = React.useState<
+    { location: string | null; intraday: number[] }[] | null
+  >(null);
+  const [dayLoading, setDayLoading] = React.useState(false);
+  const [dayError, setDayError] = React.useState<string | null>(null);
+  const dayCache = React.useRef(
+    new Map<string, { location: string | null; intraday: number[] }[]>()
+  );
+
+  React.useEffect(() => {
+    if (!selectedDay) {
+      setDayMeters(null);
+      setDayError(null);
+      setDayLoading(false);
+      return;
+    }
+    const cached = dayCache.current.get(selectedDay);
+    if (cached) {
+      setDayMeters(cached);
+      setDayError(null);
+      setDayLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDayLoading(true);
+    setDayError(null);
+    setDayMeters(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/resident/day-blocks?date=${selectedDay}`, {
+          cache: "no-store",
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error || "Could not load that day.");
+        dayCache.current.set(selectedDay, body.meters);
+        if (!cancelled) setDayMeters(body.meters);
+      } catch (e: any) {
+        if (!cancelled) setDayError(e?.message || "Could not load that day.");
+      } finally {
+        if (!cancelled) setDayLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDay]);
+
   if (!flat || flat.meters.length === 0) {
     // Still show the chat. A resident with no readings is precisely the one
     // who needs to tell someone — previously this early return replaced the
@@ -714,30 +565,6 @@ export function ResidentView({
       </div>
     );
   }
-
-  const chartData = dates.map((date) => {
-    let kitchen = 0;
-    let bathroom = 0;
-    let other = 0;
-    for (const m of flat.meters) {
-      const r = m.readings.find((x) => x.date === date);
-      if (!r) continue;
-      const loc = (m.location || "").toLowerCase();
-      if (loc === "kitchen") kitchen += r.consumptionLitres;
-      else if (loc === "bathroom") bathroom += r.consumptionLitres;
-      else other += r.consumptionLitres;
-    }
-    return {
-      label: new Date(date).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-      }),
-      Kitchen: kitchen,
-      Bathroom: bathroom,
-      Other: other,
-    };
-  });
-  const hasOther = chartData.some((d) => d.Other > 0);
 
   // Monthly trend chart — one stacked series per meter location, built
   // generically from whatever locations actually appear (not hardcoded
@@ -772,6 +599,7 @@ export function ResidentView({
   }
   const dailyMonthChartData = (dailyDays || []).map((d) => {
     const row: Record<string, string | number> = {
+      date: d.date, // read back when a bar is tapped
       label: new Date(`${d.date}T00:00:00`).toLocaleDateString("en-IN", {
         day: "2-digit",
         month: "short",
@@ -838,6 +666,38 @@ export function ResidentView({
       ];
     });
   })();
+  // The tapped day's blocks, stacked per meter location like the day bars
+  // (12 blocks of 2 hours; the count comes from the data, not assumed).
+  const dayBlockLocations: string[] = [];
+  for (const m of dayMeters || []) {
+    const loc = m.location || "Meter";
+    if (!dayBlockLocations.includes(loc)) dayBlockLocations.push(loc);
+  }
+  // Same order as the month chart, so a meter keeps its colour in both (the
+  // upstream lists a flat's meters in a different order from day to day).
+  const orderOf = (loc: string) => {
+    const i = dailyMonthLocations.indexOf(loc);
+    return i < 0 ? 99 : i;
+  };
+  dayBlockLocations.sort((a, b) => orderOf(a) - orderOf(b));
+  const dayBlockCount = Math.max(0, ...(dayMeters || []).map((m) => m.intraday.length));
+  const dayBlockHours = dayBlockCount ? 24 / dayBlockCount : 2;
+  const dayBlockRows = Array.from({ length: dayBlockCount }, (_, i) => {
+    const row: Record<string, string | number> = {
+      label: `${String(Math.round(i * dayBlockHours)).padStart(2, "0")}:00`,
+    };
+    for (const loc of dayBlockLocations) row[loc] = 0;
+    for (const m of dayMeters || []) {
+      const loc = m.location || "Meter";
+      row[loc] = (row[loc] as number) + (m.intraday[i] || 0);
+    }
+    return row;
+  });
+  const dayBlockTotal = dayBlockRows.reduce(
+    (a, r) => a + dayBlockLocations.reduce((s, loc) => s + (r[loc] as number), 0),
+    0
+  );
+
   const dailyMonthLitres = dailyTotals.reduce((a, b) => a + b, 0);
   const dailyMonthCost = applySlabs(
     dailyMonthLitres,
@@ -896,60 +756,6 @@ export function ResidentView({
 
       {/* Usage alert / budget */}
       <BudgetCard usage={usage} initial={budget} />
-
-      {/* Daily chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Daily consumption</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart
-              data={chartData}
-              margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="hsl(var(--border))"
-                vertical={false}
-              />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                content={<ChartTooltip />}
-                cursor={{ fill: "hsl(var(--muted))" }}
-              />
-              <Bar dataKey="Kitchen" stackId="a" fill={PRIMARY} maxBarSize={22} />
-              <Bar
-                dataKey="Bathroom"
-                stackId="a"
-                fill={SECONDARY}
-                radius={hasOther ? undefined : [3, 3, 0, 0]}
-                maxBarSize={22}
-              />
-              {hasOther && (
-                <Bar
-                  dataKey="Other"
-                  stackId="a"
-                  fill="hsl(var(--muted-foreground))"
-                  radius={[3, 3, 0, 0]}
-                  maxBarSize={22}
-                />
-              )}
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
 
       {/* Monthly chart */}
       {monthlyChartData.length > 0 && (
@@ -1014,7 +820,10 @@ export function ResidentView({
             <CardTitle>Daily consumption by month</CardTitle>
             <Select
               value={dailyMonth}
-              onChange={(e) => setDailyMonth(e.target.value)}
+              onChange={(e) => {
+                setDailyMonth(e.target.value);
+                setSelectedDay(null);
+              }}
               className="h-9 w-auto text-sm"
               aria-label="Choose a month"
             >
@@ -1092,6 +901,13 @@ export function ResidentView({
                   <ComposedChart
                     data={dailyMonthChartData}
                     margin={{ top: 8, right: showTotalizer ? 0 : 8, left: -10, bottom: 0 }}
+                    style={{ cursor: "pointer" }}
+                    // Tapping anywhere in a day's column (not just the thin bar)
+                    // selects that day; tapping it again closes it.
+                    onClick={(state: any) => {
+                      const date = state?.activePayload?.[0]?.payload?.date;
+                      if (date) setSelectedDay((cur) => (cur === date ? null : date));
+                    }}
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -1139,7 +955,14 @@ export function ResidentView({
                         fill="hsl(var(--success))"
                         radius={[3, 3, 0, 0]}
                         maxBarSize={16}
-                      />
+                      >
+                        {dailyMonthChartData.map((r) => (
+                          <Cell
+                            key={String(r.date)}
+                            fillOpacity={selectedDay && r.date !== selectedDay ? 0.35 : 1}
+                          />
+                        ))}
+                      </Bar>
                     ) : (
                       dailyMonthLocations.map((loc, i) => (
                         <Bar
@@ -1151,7 +974,14 @@ export function ResidentView({
                             i === dailyMonthLocations.length - 1 ? [3, 3, 0, 0] : undefined
                           }
                           maxBarSize={16}
-                        />
+                        >
+                          {dailyMonthChartData.map((r) => (
+                            <Cell
+                              key={String(r.date)}
+                              fillOpacity={selectedDay && r.date !== selectedDay ? 0.35 : 1}
+                            />
+                          ))}
+                        </Bar>
                       ))
                     )}
                     {showTotalizer &&
@@ -1171,6 +1001,90 @@ export function ResidentView({
                       ))}
                   </ComposedChart>
                 </ResponsiveContainer>
+
+                {selectedDay ? (
+                  <div className="mt-3 rounded-lg border border-border p-3">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {formatDate(selectedDay)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Usage in {dayBlockHours}-hour blocks
+                          {dayBlockRows.length > 0 && ` · ${litres(dayBlockTotal)} in the day`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedDay(null)}
+                        aria-label="Close this day"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+                      >
+                        <IconX className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {dayLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                        <Spinner className="h-5 w-5" /> Loading…
+                      </div>
+                    ) : dayError ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground">{dayError}</p>
+                    ) : dayBlockRows.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        No block-wise reading for this day — either it hasn&apos;t
+                        reported yet, or it is too far back to be kept.
+                      </p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={180}>
+                        <BarChart
+                          data={dayBlockRows}
+                          margin={{ top: 4, right: 8, left: -14, bottom: 0 }}
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="hsl(var(--border))"
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                            tickLine={false}
+                            axisLine={false}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                            tickLine={false}
+                            axisLine={false}
+                          />
+                          <Tooltip
+                            content={<MonthlyChartTooltip />}
+                            cursor={{ fill: "hsl(var(--muted))" }}
+                          />
+                          {dayBlockLocations.length > 1 && (
+                            <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+                          )}
+                          {dayBlockLocations.map((loc, i) => (
+                            <Bar
+                              key={loc}
+                              dataKey={loc}
+                              stackId="a"
+                              fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                              radius={
+                                i === dayBlockLocations.length - 1 ? [3, 3, 0, 0] : undefined
+                              }
+                              maxBarSize={18}
+                            />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-center text-xs text-muted-foreground">
+                    Tap a day to see it in {dayBlockHours}-hour blocks.
+                  </p>
+                )}
+
                 {totalizerWorking.length > 0 && (
                   <div className="mt-3 rounded-lg border border-border p-3 text-xs">
                     <p className="mb-1.5 font-medium text-foreground">
@@ -1256,9 +1170,6 @@ export function ResidentView({
           </CardContent>
         </Card>
       )}
-
-      {/* Day-wise history with intraday detail */}
-      <HistorySection flat={flat} dates={dates} />
 
       {/* Per-meter detail */}
       <Card>

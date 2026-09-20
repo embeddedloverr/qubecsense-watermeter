@@ -57,7 +57,6 @@ export default async function ResidentHome() {
   let flat: LiveFlat | null = null;
   let project: string | null = null;
   let building: string | null = null;
-  let dates: string[] = [];
   let error: string | null = null;
   let creds: LiveDataCreds | undefined;
 
@@ -66,7 +65,6 @@ export default async function ResidentHome() {
     const data = await fetchLiveData({ days: 32, flat: flatNumber }, creds);
     project = data.project;
     building = data.building;
-    dates = data.range?.dates || [];
     flat = data.flats.find((f) => f.flat === flatNumber) || null;
   } catch (e) {
     error =
@@ -248,7 +246,6 @@ export default async function ResidentHome() {
       ) : (
         <ResidentView
           flat={flat}
-          dates={dates}
           month={month}
           monthLitres={monthLitres}
           monthComplete={monthComplete}
