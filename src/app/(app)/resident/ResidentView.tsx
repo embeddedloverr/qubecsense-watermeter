@@ -4,6 +4,8 @@ import * as React from "react";
 import {
   ResponsiveContainer,
   BarChart,
+  ComposedChart,
+  Line,
   Bar,
   XAxis,
   YAxis,
@@ -85,11 +87,14 @@ function monthShortLabel(m: string): string {
 function DailyChartTooltip({ active, payload, label, view }: any) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload || {};
+  const isTz = (p: any) => String(p.dataKey).startsWith("tz:");
+  const usage = payload.filter((p: any) => !isTz(p));
+  const totalizers = payload.filter((p: any) => isTz(p) && p.value != null);
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
       <p className="font-medium text-foreground">{label}</p>
       {view === "litres" &&
-        payload.map((p: any) => (
+        usage.map((p: any) => (
           <p key={p.dataKey} className="text-muted-foreground">
             {p.name}: {Math.round(p.value).toLocaleString("en-IN")} L
           </p>
@@ -104,6 +109,19 @@ function DailyChartTooltip({ active, payload, label, view }: any) {
         Cost:{" "}
         <span className="font-medium text-foreground">{rupees(row.cost || 0)}</span>
       </p>
+      {totalizers.length > 0 && (
+        <div className="mt-0.5 border-t border-border pt-0.5">
+          <p className="text-muted-foreground">Totalizer (meter reading)</p>
+          {totalizers.map((p: any) => (
+            <p key={p.dataKey} className="text-muted-foreground">
+              {String(p.dataKey).slice(3)}:{" "}
+              <span className="font-medium text-foreground">
+                {Math.round(p.value).toLocaleString("en-IN")} L
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -651,6 +669,7 @@ export function ResidentView({
     { date: string; meters: FlatConsumptionMeter[] }[] | null
   >(null);
   const [dailyView, setDailyView] = React.useState<"litres" | "cost">("litres");
+  const [showTotalizer, setShowTotalizer] = React.useState(true);
   const [dailyLoading, setDailyLoading] = React.useState(false);
   const [dailyError, setDailyError] = React.useState<string | null>(null);
 
@@ -760,8 +779,14 @@ export function ResidentView({
     };
     for (const loc of dailyMonthLocations) row[loc] = 0;
     for (const meter of d.meters) {
-      if (meter.consumptionLitres == null) continue;
       const loc = meter.location || "Meter";
+      // The meter's closing totalizer reading for the day (`tz:` prefix keeps
+      // it apart from the usage series). Left unset when a day has none, so
+      // the line bridges the gap instead of dropping to zero.
+      if (meter.totalizerEnd != null) {
+        row[`tz:${loc}`] = ((row[`tz:${loc}`] as number) || 0) + meter.totalizerEnd;
+      }
+      if (meter.consumptionLitres == null) continue;
       row[loc] = (row[loc] as number) + meter.consumptionLitres;
     }
     return row;
@@ -996,32 +1021,45 @@ export function ResidentView({
                       </p>
                     </div>
                   </div>
-                  <div
-                    role="group"
-                    aria-label="Chart shows"
-                    className="inline-flex rounded-lg border border-border p-0.5"
-                  >
-                    {(["litres", "cost"] as const).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => setDailyView(v)}
-                        aria-pressed={dailyView === v}
-                        className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                          dailyView === v
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {v === "litres" ? "Litres" : "Cost (₹)"}
-                      </button>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div
+                      role="group"
+                      aria-label="Chart shows"
+                      className="inline-flex rounded-lg border border-border p-0.5"
+                    >
+                      {(["litres", "cost"] as const).map((v) => (
+                        <button
+                          key={v}
+                          onClick={() => setDailyView(v)}
+                          aria-pressed={dailyView === v}
+                          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                            dailyView === v
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {v === "litres" ? "Litres" : "Cost (₹)"}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setShowTotalizer((s) => !s)}
+                      aria-pressed={showTotalizer}
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium transition-colors ${
+                        showTotalizer
+                          ? "border-primary bg-accent text-accent-foreground"
+                          : "border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Totalizer line
+                    </button>
                   </div>
                 </div>
 
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart
+                <ResponsiveContainer width="100%" height={240}>
+                  <ComposedChart
                     data={dailyMonthChartData}
-                    margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
+                    margin={{ top: 8, right: showTotalizer ? 0 : 8, left: -10, bottom: 0 }}
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -1043,44 +1081,63 @@ export function ResidentView({
                         dailyView === "cost" ? (v: number) => `₹${v}` : undefined
                       }
                     />
+                    {showTotalizer && (
+                      <YAxis
+                        yAxisId="tz"
+                        orientation="right"
+                        width={48}
+                        domain={["auto", "auto"]}
+                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v: number) => v.toLocaleString("en-IN")}
+                      />
+                    )}
                     <Tooltip
                       content={<DailyChartTooltip view={dailyView} />}
                       cursor={{ fill: "hsl(var(--muted))" }}
                     />
+                    {(showTotalizer || (dailyView === "litres" && dailyMonthLocations.length > 1)) && (
+                      <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+                    )}
                     {dailyView === "cost" ? (
                       <Bar
                         dataKey="cost"
                         name="Cost"
-                        fill={PRIMARY}
+                        fill="hsl(var(--success))"
                         radius={[3, 3, 0, 0]}
                         maxBarSize={16}
                       />
                     ) : (
-                      <>
-                        {dailyMonthLocations.length > 1 && (
-                          <Legend
-                            wrapperStyle={{ fontSize: 11 }}
-                            iconType="circle"
-                            iconSize={8}
-                          />
-                        )}
-                        {dailyMonthLocations.map((loc, i) => (
-                          <Bar
-                            key={loc}
-                            dataKey={loc}
-                            stackId="a"
-                            fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
-                            radius={
-                              i === dailyMonthLocations.length - 1
-                                ? [3, 3, 0, 0]
-                                : undefined
-                            }
-                            maxBarSize={16}
-                          />
-                        ))}
-                      </>
+                      dailyMonthLocations.map((loc, i) => (
+                        <Bar
+                          key={loc}
+                          dataKey={loc}
+                          stackId="a"
+                          fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                          radius={
+                            i === dailyMonthLocations.length - 1 ? [3, 3, 0, 0] : undefined
+                          }
+                          maxBarSize={16}
+                        />
+                      ))
                     )}
-                  </BarChart>
+                    {showTotalizer &&
+                      dailyMonthLocations.map((loc, i) => (
+                        <Line
+                          key={`tz:${loc}`}
+                          yAxisId="tz"
+                          type="monotone"
+                          dataKey={`tz:${loc}`}
+                          name={`${loc} totalizer`}
+                          stroke={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                          strokeWidth={2}
+                          strokeDasharray="4 3"
+                          dot={false}
+                          connectNulls
+                        />
+                      ))}
+                  </ComposedChart>
                 </ResponsiveContainer>
                 <p className="mt-2 text-xs text-muted-foreground">
                   Same rates as your bill. Slab 1 covers the first{" "}
@@ -1089,6 +1146,8 @@ export function ResidentView({
                   into as the month builds up — later days can cost more per
                   litre. A missing reading can make this differ slightly from
                   the bill.
+                  {showTotalizer &&
+                    " The dashed lines are each meter's totalizer — its running meter reading (right-hand scale); the litres used in a day are the rise in that line."}
                 </p>
               </>
             )}
