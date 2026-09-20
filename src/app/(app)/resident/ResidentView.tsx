@@ -783,7 +783,10 @@ export function ResidentView({
       // The meter's closing totalizer reading for the day (`tz:` prefix keeps
       // it apart from the usage series). Left unset when a day has none, so
       // the line bridges the gap instead of dropping to zero.
-      if (meter.totalizerEnd != null) {
+      // Only a reading actually dated that day: a day with no reading yet
+      // (today's, or a gap) comes back carrying a stale older one, which
+      // would make the line drop.
+      if (meter.totalizerEnd != null && meter.totalizerEndDate === d.date) {
         row[`tz:${loc}`] = ((row[`tz:${loc}`] as number) || 0) + meter.totalizerEnd;
       }
       if (meter.consumptionLitres == null) continue;
@@ -806,6 +809,35 @@ export function ResidentView({
     row.litresTotal = dailyTotals[i];
     row.cost = dailyCostList[i];
   });
+  // The month's totalizer arithmetic, per meter: closing reading on the last
+  // day minus the OPENING reading — the last one before the month starts (day
+  // 1's start), not day 1's own reading, which already contains day 1's water.
+  const totalizerWorking = (() => {
+    const days = dailyDays || [];
+    const first = days.find((d) => d.meters.length > 0);
+    if (!first) return [];
+    return first.meters.flatMap((fm) => {
+      if (fm.totalizerStart == null) return [];
+      // The meter's latest reading actually dated that day — not the stale
+      // one a day with no reading yet (e.g. today) carries.
+      let close: FlatConsumptionMeter | null = null;
+      for (let i = days.length - 1; i >= 0 && !close; i--) {
+        const m = days[i].meters.find((x) => x.deviceKey === fm.deviceKey);
+        if (m && m.totalizerEnd != null && m.totalizerEndDate === days[i].date) close = m;
+      }
+      if (!close || close.totalizerEnd == null) return [];
+      return [
+        {
+          key: fm.deviceKey,
+          location: fm.location || "Meter",
+          open: fm.totalizerStart,
+          openDate: fm.totalizerStartDate,
+          close: close.totalizerEnd,
+          closeDate: close.totalizerEndDate,
+        },
+      ];
+    });
+  })();
   const dailyMonthLitres = dailyTotals.reduce((a, b) => a + b, 0);
   const dailyMonthCost = applySlabs(
     dailyMonthLitres,
@@ -1139,6 +1171,43 @@ export function ResidentView({
                       ))}
                   </ComposedChart>
                 </ResponsiveContainer>
+                {totalizerWorking.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-border p-3 text-xs">
+                    <p className="mb-1.5 font-medium text-foreground">
+                      How the month usage is worked out
+                    </p>
+                    <ul className="space-y-1 text-muted-foreground">
+                      {totalizerWorking.map((t) => (
+                        <li
+                          key={t.key}
+                          className="flex flex-wrap items-baseline justify-between gap-x-3"
+                        >
+                          <span>
+                            {t.location}: {t.close.toLocaleString("en-IN")}
+                            {t.closeDate ? ` (${formatDate(t.closeDate)})` : ""} −{" "}
+                            {t.open.toLocaleString("en-IN")}
+                            {t.openDate ? ` (${formatDate(t.openDate)})` : ""}
+                          </span>
+                          <span className="tabular font-medium text-foreground">
+                            {litres(t.close - t.open)}
+                          </span>
+                        </li>
+                      ))}
+                      <li className="flex justify-between border-t border-border pt-1 font-medium text-foreground">
+                        <span>Total</span>
+                        <span className="tabular">
+                          {litres(totalizerWorking.reduce((a, t) => a + (t.close - t.open), 0))}
+                        </span>
+                      </li>
+                    </ul>
+                    <p className="mt-1.5 text-muted-foreground">
+                      Closing reading minus the opening reading — the last reading
+                      before the month starts. Starting from the reading on day 1
+                      would leave day 1 out, because that reading already includes
+                      day 1&apos;s water.
+                    </p>
+                  </div>
+                )}
                 <p className="mt-2 text-xs text-muted-foreground">
                   Same rates as your bill. Slab 1 covers the first{" "}
                   {(dailySlabs[0]?.limitLitres ?? 0).toLocaleString("en-IN")} L of
