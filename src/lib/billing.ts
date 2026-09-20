@@ -361,6 +361,26 @@ export function standardSlabs(days: number): Slab[] {
   ];
 }
 
+/**
+ * What each day of a month cost. Slabs price the month's CUMULATIVE litres,
+ * so a day has no rate of its own: its cost is the marginal cost of its
+ * litres given what was already used earlier in the month — cheap while still
+ * inside slab 1, dearer once the month crosses into the higher slabs. Priced
+ * as (bill after this day) − (bill after the previous day), so the daily
+ * costs add up exactly to the month's slab charge (fixed charge excluded).
+ */
+export function dailyCosts(dailyLitres: number[], slabs: Slab[]): number[] {
+  let cumulative = 0;
+  let prevAmount = 0;
+  return dailyLitres.map((litres) => {
+    cumulative += Math.max(0, litres);
+    const amount = applySlabs(cumulative, slabs, 0).amount;
+    const cost = Math.round((amount - prevAmount) * 100) / 100;
+    prevAmount = amount;
+    return cost;
+  });
+}
+
 /** Inclusive day count of a YYYY-MM-DD span (a calendar month → 28/29/30/31). */
 export function daysBetweenInclusive(from: string, to: string): number {
   return (

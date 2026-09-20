@@ -38,7 +38,14 @@ import {
   AttachmentThumb,
 } from "@/components/ChatAttachment";
 import type { LiveFlat, LiveMeter } from "@/lib/liveData";
-import type { MonthlyHistoryPoint } from "@/lib/billing";
+import {
+  STANDARD_TARIFF,
+  applySlabs,
+  dailyCosts,
+  daysInMonth,
+  standardSlabs,
+  type MonthlyHistoryPoint,
+} from "@/lib/billing";
 import type { FlatConsumptionMeter } from "@/lib/flatConsumptionTypes";
 
 interface SlabCharge {
@@ -72,6 +79,33 @@ function monthShortLabel(m: string): string {
     month: "short",
     year: "2-digit",
   });
+}
+
+/** Tooltip for the day-by-day chart: usage and that day's cost. */
+function DailyChartTooltip({ active, payload, label, view }: any) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload || {};
+  return (
+    <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
+      <p className="font-medium text-foreground">{label}</p>
+      {view === "litres" &&
+        payload.map((p: any) => (
+          <p key={p.dataKey} className="text-muted-foreground">
+            {p.name}: {Math.round(p.value).toLocaleString("en-IN")} L
+          </p>
+        ))}
+      <p className="mt-0.5 border-t border-border pt-0.5 text-muted-foreground">
+        Usage:{" "}
+        <span className="font-medium text-foreground">
+          {Math.round(row.litresTotal || 0).toLocaleString("en-IN")} L
+        </span>
+      </p>
+      <p className="text-muted-foreground">
+        Cost:{" "}
+        <span className="font-medium text-foreground">{rupees(row.cost || 0)}</span>
+      </p>
+    </div>
+  );
 }
 
 function MonthlyChartTooltip({ active, payload, label }: any) {
@@ -616,6 +650,7 @@ export function ResidentView({
   const [dailyDays, setDailyDays] = React.useState<
     { date: string; meters: FlatConsumptionMeter[] }[] | null
   >(null);
+  const [dailyView, setDailyView] = React.useState<"litres" | "cost">("litres");
   const [dailyLoading, setDailyLoading] = React.useState(false);
   const [dailyError, setDailyError] = React.useState<string | null>(null);
 
@@ -734,6 +769,24 @@ export function ResidentView({
   const dailyMonthHasData = dailyMonthChartData.some((d) =>
     dailyMonthLocations.some((loc) => (d[loc] as number) > 0)
   );
+
+  // Cost of each day and of the month, priced through the same slabs as the
+  // bill (slab 1's allowance is 360 L × this calendar month's days).
+  const dailySlabs = dailyMonth ? standardSlabs(daysInMonth(dailyMonth)) : [];
+  const dailyTotals = dailyMonthChartData.map((d) =>
+    dailyMonthLocations.reduce((a, loc) => a + (d[loc] as number), 0)
+  );
+  const dailyCostList = dailyCosts(dailyTotals, dailySlabs);
+  dailyMonthChartData.forEach((row, i) => {
+    row.litresTotal = dailyTotals[i];
+    row.cost = dailyCostList[i];
+  });
+  const dailyMonthLitres = dailyTotals.reduce((a, b) => a + b, 0);
+  const dailyMonthCost = applySlabs(
+    dailyMonthLitres,
+    dailySlabs,
+    STANDARD_TARIFF.fixedCharge
+  ).amount;
 
   let from = 0;
 
@@ -927,47 +980,117 @@ export function ResidentView({
                 No day-wise data for {monthLabel(dailyMonth)}.
               </p>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart
-                  data={dailyMonthChartData}
-                  margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--border))"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                    tickLine={false}
-                    axisLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip
-                    content={<MonthlyChartTooltip />}
-                    cursor={{ fill: "hsl(var(--muted))" }}
-                  />
-                  {dailyMonthLocations.length > 1 && (
-                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-                  )}
-                  {dailyMonthLocations.map((loc, i) => (
-                    <Bar
-                      key={loc}
-                      dataKey={loc}
-                      stackId="a"
-                      fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
-                      radius={i === dailyMonthLocations.length - 1 ? [3, 3, 0, 0] : undefined}
-                      maxBarSize={16}
+              <>
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                  <div className="flex gap-6">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Month usage</p>
+                      <p className="tabular text-lg font-bold text-foreground">
+                        {litres(dailyMonthLitres)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Month cost</p>
+                      <p className="tabular text-lg font-bold text-foreground">
+                        {rupees(dailyMonthCost)}
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Chart shows"
+                    className="inline-flex rounded-lg border border-border p-0.5"
+                  >
+                    {(["litres", "cost"] as const).map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setDailyView(v)}
+                        aria-pressed={dailyView === v}
+                        className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                          dailyView === v
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {v === "litres" ? "Litres" : "Cost (₹)"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart
+                    data={dailyMonthChartData}
+                    margin={{ top: 8, right: 8, left: -10, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="hsl(var(--border))"
+                      vertical={false}
                     />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      tickLine={false}
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={
+                        dailyView === "cost" ? (v: number) => `₹${v}` : undefined
+                      }
+                    />
+                    <Tooltip
+                      content={<DailyChartTooltip view={dailyView} />}
+                      cursor={{ fill: "hsl(var(--muted))" }}
+                    />
+                    {dailyView === "cost" ? (
+                      <Bar
+                        dataKey="cost"
+                        name="Cost"
+                        fill={PRIMARY}
+                        radius={[3, 3, 0, 0]}
+                        maxBarSize={16}
+                      />
+                    ) : (
+                      <>
+                        {dailyMonthLocations.length > 1 && (
+                          <Legend
+                            wrapperStyle={{ fontSize: 11 }}
+                            iconType="circle"
+                            iconSize={8}
+                          />
+                        )}
+                        {dailyMonthLocations.map((loc, i) => (
+                          <Bar
+                            key={loc}
+                            dataKey={loc}
+                            stackId="a"
+                            fill={MONTHLY_CHART_COLORS[i % MONTHLY_CHART_COLORS.length]}
+                            radius={
+                              i === dailyMonthLocations.length - 1
+                                ? [3, 3, 0, 0]
+                                : undefined
+                            }
+                            maxBarSize={16}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Same rates as your bill. Slab 1 covers the first{" "}
+                  {(dailySlabs[0]?.limitLitres ?? 0).toLocaleString("en-IN")} L of
+                  the month, so each day is priced at the slab its litres fall
+                  into as the month builds up — later days can cost more per
+                  litre. A missing reading can make this differ slightly from
+                  the bill.
+                </p>
+              </>
             )}
           </CardContent>
         </Card>
