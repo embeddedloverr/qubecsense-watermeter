@@ -12,6 +12,7 @@
 // hasReading from ./flatConsumptionTypes instead — see that file for why.
 
 import { LiveDataError, type LiveDataCreds } from "./liveData";
+import { PAUSED_OVERLAP_CORRECTION_FLATS } from "./billing";
 import type {
   FlatConsumptionEntry,
   FlatConsumptionMeter,
@@ -196,8 +197,29 @@ export async function fetchFlatDailyRange(
   const days = await Promise.all(
     dates.map((date) => fetchFlatDaily({ date, flat }, creds).catch(() => null))
   );
-  return dates.map((date, i) => ({
-    date,
-    meters: days[i]?.flats.find((f) => f.flat === flat)?.meters || [],
-  }));
+  // A flat whose shared-plumbing correction is paused for billing is billed
+  // on RAW readings for the whole period, so every day here uses the raw
+  // reading too. Upstream would otherwise withhold the days its correction
+  // can't compute (chart near zero while the bill is ~12,000 L) and deduct
+  // the shared water on the days it can (a total smaller than the bill).
+  const paused = PAUSED_OVERLAP_CORRECTION_FLATS.includes(flat);
+  return dates.map((date, i) => {
+    const entry = days[i]?.flats.find((f) => f.flat === flat);
+    const meters = entry?.meters || [];
+    return {
+      date,
+      meters: paused
+        ? meters.map((m) =>
+            m.rawConsumptionLitres != null
+              ? {
+                  ...m,
+                  consumptionLitres: m.rawConsumptionLitres,
+                  anomaly: null,
+                  correction: null,
+                }
+              : m
+          )
+        : meters,
+    };
+  });
 }
