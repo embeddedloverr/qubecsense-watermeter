@@ -1,7 +1,7 @@
 // `import type` only — erased at compile time, so this file (imported both
 // client-side for the lazy PDF share button and server-side in the billing
 // routes) never actually pulls flatConsumptionTypes.ts's runtime code in.
-import type { FlatConsumptionMeter, FlatMonthlyEntry } from "./flatConsumptionTypes";
+import type { FlatConsumptionEntry, FlatConsumptionMeter } from "./flatConsumptionTypes";
 
 /**
  * Flats whose shared-plumbing correction (see nudron-dashboard's
@@ -181,18 +181,22 @@ export interface MonthlyHistoryPoint {
  */
 export function resolveMonthlyHistory(
   flat: string,
-  history: { month: string; entry: FlatMonthlyEntry | null }[]
+  history: {
+    month: string;
+    entry: FlatConsumptionEntry | null;
+    isPartialMonth: boolean;
+  }[]
 ): MonthlyHistoryPoint[] {
-  return history.map(({ month, entry }) => {
+  return history.map(({ month, entry, isPartialMonth }) => {
     if (!entry) {
-      return { month, litres: null, complete: false, isPartialMonth: false, meters: [] };
+      return { month, litres: null, complete: false, isPartialMonth, meters: [] };
     }
     const resolved = resolveFlatConsumption(flat, entry);
     return {
       month,
       litres: resolved.litres,
       complete: resolved.complete,
-      isPartialMonth: entry.isPartialMonth,
+      isPartialMonth,
       meters: resolved.meters,
     };
   });

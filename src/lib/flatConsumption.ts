@@ -107,23 +107,44 @@ export function lastNMonths(n: number): string[] {
 
 /**
  * One flat's consumption for each of `months`, one upstream call per month
- * in parallel — flat-consumption/monthly has no multi-month variant, so
- * this is the shared way both the admin History panel and the resident's
- * own monthly chart pull the same several-months view. A month that fails
- * to fetch comes back with `entry: null` rather than throwing, so one bad
- * month doesn't blank the whole history.
+ * in parallel — the shared way both the admin History panel and the
+ * resident's own monthly chart pull the same several-months view. A month
+ * that fails to fetch comes back with `entry: null` rather than throwing, so
+ * one bad month doesn't blank the whole history.
+ *
+ * Deliberately built on flat-consumption/RANGE (what billing uses), not
+ * /monthly: /monthly baselines each month at the 1st's closing reading, so
+ * day 1's usage is silently dropped from every month (measured: the gap equals
+ * day-1 usage for every flat, e.g. 744 L for flat 2305 in August). /range
+ * baselines at the last reading BEFORE the month, so a month here equals the
+ * bill and the sum of that month's daily values.
  */
 export async function fetchMonthlyHistory(
   flat: string,
   months: string[],
   creds: LiveDataCreds
-): Promise<{ month: string; entry: FlatMonthlyEntry | null }[]> {
+): Promise<
+  { month: string; entry: FlatConsumptionEntry | null; isPartialMonth: boolean }[]
+> {
+  const today = new Date().toISOString().slice(0, 10);
+  const spans = months.map((month) => {
+    const [y, m] = month.split("-").map(Number);
+    return {
+      month,
+      from: `${month}-01`,
+      to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10),
+    };
+  });
   const fetched = await Promise.all(
-    months.map((month) => fetchFlatMonthly({ month, flat }, creds).catch(() => null))
+    spans.map((s) =>
+      fetchFlatRange({ from: s.from, to: s.to, flat }, creds).catch(() => null)
+    )
   );
-  return months.map((month, i) => ({
-    month,
+  return spans.map((s, i) => ({
+    month: s.month,
     entry: fetched[i]?.flats.find((f) => f.flat === flat) || null,
+    // A month whose last day hasn't finished (and reported) yet is still counting.
+    isPartialMonth: s.to >= today,
   }));
 }
 
