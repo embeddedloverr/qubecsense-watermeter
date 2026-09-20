@@ -5,10 +5,14 @@ import { Flat } from "@/lib/models/Flat";
 import { User } from "@/lib/models/User";
 import { Message } from "@/lib/models/Message";
 import { Installation } from "@/lib/models/Installation";
-import { Tariff } from "@/lib/models/Tariff";
 import { guardSuperadmin } from "@/lib/guard";
 import { fetchLiveData, resolveSiteCreds } from "@/lib/liveData";
-import { applySlabs, type Slab } from "@/lib/billing";
+import {
+  STANDARD_TARIFF,
+  applySlabs,
+  daysInMonth,
+  standardSlabs,
+} from "@/lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,7 +58,7 @@ export async function GET() {
     sites.map(async (s): Promise<SiteRow> => {
       const siteId = s._id;
 
-      const [flats, installed, residents, neverLoggedIn, unread, tariffDoc] =
+      const [flats, installed, residents, neverLoggedIn, unread] =
         await Promise.all([
           Flat.countDocuments({ siteId }),
           Installation.countDocuments({ siteId }),
@@ -69,7 +73,6 @@ export async function GET() {
             sender: "resident",
             readByAdmin: false,
           }),
-          Tariff.findOne({ siteId, key: "default" }).lean<any>(),
         ]);
 
       const base: SiteRow = {
@@ -83,7 +86,8 @@ export async function GET() {
         residents,
         neverLoggedIn,
         unread,
-        tariffConfigured: Boolean(tariffDoc?.slabs?.length),
+        // Every site is billed on the one fixed tariff now.
+        tariffConfigured: true,
         api: "unconfigured",
         metersReporting: null,
         silentMeters: null,
@@ -109,8 +113,10 @@ export async function GET() {
         for (const f of data.flats) f.meters.forEach(consider);
         data.unassigned.forEach(consider);
 
-        const slabs: Slab[] = tariffDoc?.slabs || [];
-        const fixed: number = tariffDoc?.fixedCharge || 0;
+        // A month-to-date estimate, priced against the FULL month's allowance
+        // (360 L × the month's days), like the flat-level bills are.
+        const slabs = standardSlabs(daysInMonth(month));
+        const fixed: number = STANDARD_TARIFF.fixedCharge;
         let mtd = 0;
         let revenue = 0;
         for (const f of data.flats) {
@@ -121,7 +127,7 @@ export async function GET() {
             }
           }
           mtd += flatLitres;
-          if (slabs.length) revenue += applySlabs(flatLitres, slabs, fixed).amount;
+          revenue += applySlabs(flatLitres, slabs, fixed).amount;
         }
 
         return {
@@ -131,7 +137,7 @@ export async function GET() {
           silentMeters: silent,
           lastDataAt: latest,
           consumptionMtdLitres: Math.round(mtd),
-          revenueMtd: slabs.length ? Math.round(revenue * 100) / 100 : null,
+          revenueMtd: Math.round(revenue * 100) / 100,
         };
       } catch (err: any) {
         return {
@@ -157,7 +163,7 @@ export async function GET() {
           residents: 0,
           neverLoggedIn: 0,
           unread: 0,
-          tariffConfigured: false,
+          tariffConfigured: true,
           api: "error" as const,
           apiError: "Failed to load this site.",
           metersReporting: null,

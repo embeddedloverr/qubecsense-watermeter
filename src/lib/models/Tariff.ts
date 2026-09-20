@@ -8,12 +8,16 @@ export interface ISlab {
   ratePerKl: number;
 }
 
+// Billing now uses one hardcoded tariff (STANDARD_TARIFF in lib/billing.ts).
+// `slabs` and `fixedCharge` below are LEGACY — still stored on old documents,
+// never read. Only `billingCycleStartDay` is live.
 export interface ITariff {
   _id: mongoose.Types.ObjectId;
   siteId?: mongoose.Types.ObjectId;
   key: string;
+  /** @deprecated ignored — see STANDARD_TARIFF. */
   slabs: ISlab[];
-  /** Fixed monthly charge per flat (meter/service charge), in rupees. */
+  /** @deprecated ignored — the standard tariff has no fixed charge. */
   fixedCharge: number;
   /** Day of the month a billing cycle opens. 1 = ordinary calendar month. */
   billingCycleStartDay: number;

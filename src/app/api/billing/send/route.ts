@@ -4,13 +4,17 @@ import { Flat } from "@/lib/models/Flat";
 import { Tariff } from "@/lib/models/Tariff";
 import { guard } from "@/lib/guard";
 import {
+  STANDARD_TARIFF,
   applySlabs,
+  daysBetweenInclusive,
+  isPeriodSettled,
   resolveBillingPeriod,
   resolveFlatConsumption,
-  type Slab,
+  standardSlabs,
 } from "@/lib/billing";
 import { LiveDataError, resolveSiteCreds } from "@/lib/liveData";
 import { fetchFlatRange } from "@/lib/flatConsumption";
+import { getBillingReport } from "@/lib/billingReport";
 import { renderBillPdf, type BillPdfData } from "@/lib/billPdf";
 import { sendMail, isMailConfigured } from "@/lib/mailer";
 
@@ -75,8 +79,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const slabs: Slab[] = (tariffDoc as any)?.slabs || [];
-    const fixedCharge: number = (tariffDoc as any)?.fixedCharge || 0;
     const billingCycleStartDay: number =
       (tariffDoc as any)?.billingCycleStartDay || 1;
 
@@ -91,21 +93,66 @@ export async function POST(req: NextRequest) {
     const { from, to, month, cycle } = resolved.period;
 
     const creds = await resolveSiteCreds(g.ctx.siteId);
-    const consumption = await fetchFlatRange({ from, to, flat }, creds);
-    const entry = consumption.flats.find((f) => f.flat === flat);
-    if (!entry) {
-      return NextResponse.json(
-        { error: "No meter data for this flat in that period." },
-        { status: 404 }
-      );
-    }
 
-    const resolvedConsumption = resolveFlatConsumption(flat, entry);
-    const { breakdown, amount } = applySlabs(
-      resolvedConsumption.litres,
-      slabs,
-      fixedCharge
-    );
+    // What gets billed for this flat: the figures, exactly as the report
+    // shows them. For a settled cycle month that means the SAVED bill (so the
+    // PDF a resident receives is the one on record, built on first use if it
+    // hasn't been saved yet); the current month is priced live.
+    let billed: {
+      meters: BillPdfData["meters"];
+      litres: number;
+      complete: boolean;
+      breakdown: BillPdfData["breakdown"];
+      fixedCharge: number;
+      amount: number;
+    };
+    if (period === "cycle" && isPeriodSettled(to)) {
+      const report = await getBillingReport({
+        siteId: g.ctx.siteId,
+        project: g.ctx.site.project || null,
+        building: g.ctx.site.building || null,
+        period,
+        from,
+        to,
+        month,
+        cycle,
+        billingCycleStartDay,
+        creds,
+      });
+      const row = report.rows.find((r) => r.flat === flat);
+      if (!row) {
+        return NextResponse.json(
+          { error: "No meter data for this flat in that period." },
+          { status: 404 }
+        );
+      }
+      billed = row;
+    } else {
+      const consumption = await fetchFlatRange({ from, to, flat }, creds);
+      const entry = consumption.flats.find((f) => f.flat === flat);
+      if (!entry) {
+        return NextResponse.json(
+          { error: "No meter data for this flat in that period." },
+          { status: 404 }
+        );
+      }
+      const resolvedConsumption = resolveFlatConsumption(flat, entry);
+      const fixedCharge: number = STANDARD_TARIFF.fixedCharge;
+      const { breakdown, amount } = applySlabs(
+        resolvedConsumption.litres,
+        standardSlabs(daysBetweenInclusive(from, to)),
+        fixedCharge
+      );
+      billed = {
+        meters: resolvedConsumption.meters,
+        litres: resolvedConsumption.litres,
+        complete: resolvedConsumption.complete,
+        breakdown,
+        fixedCharge,
+        amount,
+      };
+    }
+    const { breakdown, fixedCharge, amount } = billed;
 
     const periodLabel =
       period === "range" || !month
@@ -121,9 +168,9 @@ export async function POST(req: NextRequest) {
       project: g.ctx.site.project || null,
       building: g.ctx.site.building || null,
       periodLabel,
-      meters: resolvedConsumption.meters,
-      litres: resolvedConsumption.litres,
-      complete: resolvedConsumption.complete,
+      meters: billed.meters,
+      litres: billed.litres,
+      complete: billed.complete,
       breakdown,
       fixedCharge,
       amount,

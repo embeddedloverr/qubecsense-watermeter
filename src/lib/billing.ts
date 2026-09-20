@@ -331,26 +331,67 @@ export function applySlabs(
   return { breakdown, amount: Math.round(amount * 100) / 100 };
 }
 
-/** Validate a slab list: rates ≥ 0, limits positive and strictly increasing, only the last slab may be unbounded. */
-export function validateSlabs(slabs: Slab[]): string | null {
-  if (!Array.isArray(slabs) || slabs.length === 0) {
-    return "Add at least one slab.";
-  }
-  let prev = 0;
-  for (let i = 0; i < slabs.length; i++) {
-    const s = slabs[i];
-    if (typeof s.ratePerKl !== "number" || s.ratePerKl < 0 || !Number.isFinite(s.ratePerKl)) {
-      return `Slab ${i + 1}: rate must be a number ≥ 0.`;
-    }
-    const isLast = i === slabs.length - 1;
-    if (s.limitLitres === null) {
-      if (!isLast) return `Slab ${i + 1}: only the last slab can be open-ended.`;
-      continue;
-    }
-    if (typeof s.limitLitres !== "number" || !Number.isFinite(s.limitLitres) || s.limitLitres <= prev) {
-      return `Slab ${i + 1}: limit must be greater than ${prev.toLocaleString("en-IN")} L.`;
-    }
-    prev = s.limitLitres;
-  }
-  return null;
+/**
+ * The one tariff every site is billed on (hardcoded — no longer editable per
+ * site). Slab 1 is a per-day allowance, so its upper limit scales with the
+ * length of the period being billed; the other cut-offs are fixed litre
+ * totals for the period. Cut-offs are cumulative, rates are ₹ per kilolitre
+ * (₹0.03/L = ₹30/kL).
+ */
+export const STANDARD_TARIFF = {
+  slab1LitresPerDay: 360,
+  slab1RatePerKl: 30,
+  upperSlabs: [
+    { limitLitres: 20000, ratePerKl: 100 },
+    { limitLitres: 30000, ratePerKl: 150 },
+    { limitLitres: null, ratePerKl: 200 },
+  ] as Slab[],
+  /** The tariff sheet lists no fixed charge. */
+  fixedCharge: 0,
+} as const;
+
+/** The slabs for a period of `days` days: slab 1 covers 360 L per day. */
+export function standardSlabs(days: number): Slab[] {
+  return [
+    {
+      limitLitres: STANDARD_TARIFF.slab1LitresPerDay * Math.max(1, days),
+      ratePerKl: STANDARD_TARIFF.slab1RatePerKl,
+    },
+    ...STANDARD_TARIFF.upperSlabs,
+  ];
+}
+
+/** Inclusive day count of a YYYY-MM-DD span (a calendar month → 28/29/30/31). */
+export function daysBetweenInclusive(from: string, to: string): number {
+  return (
+    Math.round(
+      (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+        86_400_000
+    ) + 1
+  );
+}
+
+/** Days in a calendar month given as "YYYY-MM". */
+export function daysInMonth(month: string): number {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/**
+ * A billed period is stored (frozen) once it closed this many days ago, not
+ * the moment it ends: meters report a day's totals the following day, and a
+ * few report later still, so freezing on day 1 would lock in avoidable
+ * "Incomplete" flats.
+ */
+export const SNAPSHOT_SETTLE_DAYS = 3;
+
+/** The first date a closed period's bills are final enough to store. */
+export function finalizeDate(periodTo: string): string {
+  const d = new Date(`${periodTo}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + SNAPSHOT_SETTLE_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+export function isPeriodSettled(periodTo: string): boolean {
+  return new Date().toISOString().slice(0, 10) >= finalizeDate(periodTo);
 }

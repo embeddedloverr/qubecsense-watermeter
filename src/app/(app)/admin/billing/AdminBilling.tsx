@@ -24,10 +24,10 @@ import {
   IconMail,
 } from "@/components/icons";
 import { useToast } from "@/components/Toast";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { ANOMALY_LABEL, hasReading } from "@/lib/flatConsumptionTypes";
 import { renderBillPdf, renderBillImage, type BillPdfData } from "@/lib/billPdf";
-import { applySlabs } from "@/lib/billing";
+import { STANDARD_TARIFF, applySlabs } from "@/lib/billing";
 
 /* ----------------------------------- Types ---------------------------------- */
 
@@ -119,7 +119,14 @@ interface Report {
     fixedCharge: number;
     billingCycleStartDay: number;
     configured: boolean;
+    /** Days in the billed period — slab 1's allowance is 360 L × this. */
+    days: number;
   };
+  /** "saved" = a frozen, closed month; "live" = computed just now. */
+  source: "live" | "saved";
+  savedAt?: string;
+  /** Live cycle report only: the date its bills get frozen. */
+  finalizesOn?: string;
   flatCount: number;
   totalLitres: number;
   totalLitresExcluded: number;
@@ -429,87 +436,64 @@ async function buildPdf(report: Report, rows: BillRow[]): Promise<Blob> {
   return doc.output("blob");
 }
 
-/* ------------------------------- Tariff editor ------------------------------- */
+/* ------------------------------- Tariff panel -------------------------------- */
 
-interface SlabDraft {
-  limit: string; // "" = open-ended (last slab)
-  rate: string;
+/** The fixed tariff, as the printed sheet lays it out (₹ per litre). */
+function standardTariffRows(): { slab: number; usage: string; rate: string }[] {
+  const perL = (perKl: number) =>
+    `₹${(perKl / 1000).toFixed(2)}/L (₹${perKl}/kL)`;
+  const rows = [
+    {
+      slab: 1,
+      usage: `${STANDARD_TARIFF.slab1LitresPerDay} L × days in the month`,
+      rate: perL(STANDARD_TARIFF.slab1RatePerKl),
+    },
+  ];
+  let prev: number | null = null;
+  STANDARD_TARIFF.upperSlabs.forEach((s, i) => {
+    rows.push({
+      slab: i + 2,
+      usage:
+        s.limitLitres === null
+          ? `Above ${(prev ?? 0).toLocaleString("en-IN")} L`
+          : `Up to ${s.limitLitres.toLocaleString("en-IN")} L`,
+      rate: perL(s.ratePerKl),
+    });
+    if (s.limitLitres !== null) prev = s.limitLitres;
+  });
+  return rows;
 }
 
-function TariffEditor({
-  onSaved,
-}: {
-  onSaved: (slabs: Slab[], fixedCharge: number) => void;
-}) {
+function TariffPanel({ onSaved }: { onSaved: () => void }) {
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
-  const [slabs, setSlabs] = React.useState<SlabDraft[]>([]);
-  const [fixed, setFixed] = React.useState("0");
   const [cycleDay, setCycleDay] = React.useState("1");
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     fetch("/api/billing/tariff")
       .then((r) => r.json())
-      .then((d) => {
-        const s: Slab[] = d.tariff?.slabs || [];
-        setSlabs(
-          s.length
-            ? s.map((x) => ({
-                limit: x.limitLitres === null ? "" : String(x.limitLitres),
-                rate: String(x.ratePerKl),
-              }))
-            : [{ limit: "", rate: "" }]
-        );
-        setFixed(String(d.tariff?.fixedCharge ?? 0));
-        setCycleDay(String(d.tariff?.billingCycleStartDay ?? 1));
-        onSaved(s, d.tariff?.fixedCharge ?? 0);
-      })
+      .then((d) => setCycleDay(String(d.tariff?.billingCycleStartDay ?? 1)))
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const update = (i: number, field: keyof SlabDraft, value: string) => {
-    setSlabs((prev) =>
-      prev.map((s, j) => (j === i ? { ...s, [field]: value } : s))
-    );
-  };
-
-  const addSlab = () =>
-    setSlabs((prev) => {
-      const copy = [...prev];
-      // The previous last slab needs a limit before a new one goes below it.
-      return [...copy, { limit: "", rate: "" }];
-    });
-
-  const removeSlab = (i: number) =>
-    setSlabs((prev) => prev.filter((_, j) => j !== i));
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const payload = {
-        slabs: slabs.map((s) => ({
-          limitLitres: s.limit.trim() === "" ? null : Number(s.limit),
-          ratePerKl: Number(s.rate),
-        })),
-        fixedCharge: Number(fixed) || 0,
-        billingCycleStartDay: Number(cycleDay) || 1,
-      };
       const res = await fetch("/api/billing/tariff", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ billingCycleStartDay: Number(cycleDay) || 1 }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to save tariff.");
+        setError(data.error || "Failed to save the billing cycle.");
         return;
       }
-      toast("Tariff saved.", "success");
-      onSaved(data.tariff.slabs, data.tariff.fixedCharge);
+      toast("Billing cycle saved.", "success");
+      onSaved();
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -527,81 +511,37 @@ function TariffEditor({
     );
   }
 
-  let prevLimit = 0;
   return (
     <Card className="print:hidden">
       <CardHeader>
         <CardTitle>Slab-wise tariff</CardTitle>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Each slab prices the consumption falling between the previous limit
-          and its own. Leave the last limit empty for &ldquo;above&rdquo;.
-          Rates are ₹ per kilolitre (1000 L).
+          One fixed tariff for every month. Slab 1 is a daily allowance, so it
+          grows with the month&apos;s length (28, 29, 30 or 31 days); each
+          later slab prices the litres between the previous limit and its own.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
-        {slabs.map((s, i) => {
-          const from = prevLimit;
-          const parsed = Number(s.limit);
-          if (s.limit.trim() !== "" && Number.isFinite(parsed)) prevLimit = parsed;
-          const isLast = i === slabs.length - 1;
-          return (
-            <div key={i} className="flex flex-wrap items-end gap-2">
-              <div className="w-40 min-w-0 flex-1">
-                <Label className="text-xs">
-                  {i === 0 ? "Up to (L)" : `From ${from.toLocaleString("en-IN")} L up to`}
-                </Label>
-                <Input
-                  inputMode="numeric"
-                  value={s.limit}
-                  onChange={(e) => update(i, "limit", e.target.value)}
-                  placeholder={isLast ? "No limit (above)" : "e.g. 10000"}
-                />
-              </div>
-              <div className="w-36 min-w-0 flex-1">
-                <Label className="text-xs">Rate (₹/kL)</Label>
-                <Input
-                  inputMode="decimal"
-                  value={s.rate}
-                  onChange={(e) => update(i, "rate", e.target.value)}
-                  placeholder="e.g. 25"
-                />
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Remove slab ${i + 1}`}
-                onClick={() => removeSlab(i)}
-                disabled={slabs.length === 1}
-              >
-                <IconX className="h-4 w-4" />
-              </Button>
-            </div>
-          );
-        })}
-
-        <div className="flex flex-wrap items-end gap-2">
-          <Button variant="outline" size="sm" onClick={addSlab}>
-            + Add slab
-          </Button>
-          <div className="ml-auto w-44">
-            <Label className="text-xs">Fixed charge / flat (₹)</Label>
-            <Input
-              inputMode="decimal"
-              value={fixed}
-              onChange={(e) => setFixed(e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <Button size="md" onClick={save} loading={saving}>
-            Save tariff
-          </Button>
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-3 py-2 font-medium">Slab</th>
+                <th className="px-3 py-2 font-medium">Usage / calculation</th>
+                <th className="px-3 py-2 font-medium">Rate</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {standardTariffRows().map((r) => (
+                <tr key={r.slab}>
+                  <td className="tabular px-3 py-2 font-medium">{r.slab}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{r.usage}</td>
+                  <td className="tabular px-3 py-2 text-foreground">{r.rate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
 
         {/* Billing cycle */}
         <div className="rounded-lg border border-border bg-muted/30 p-3">
@@ -617,6 +557,9 @@ function TariffEditor({
                 onChange={(e) => setCycleDay(e.target.value)}
               />
             </div>
+            <Button size="md" onClick={save} loading={saving}>
+              Save
+            </Button>
             <p className="pb-2.5 text-xs text-muted-foreground">
               {Number(cycleDay) <= 1 || !cycleDay
                 ? "Day 1 = the ordinary calendar month (default)."
@@ -624,13 +567,19 @@ function TariffEditor({
                    to the ${ordinal(Number(cycleDay) - 1)} of the next.`}
             </p>
           </div>
+          {error && (
+            <p role="alert" className="mt-1.5 text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <IconCalendar className="h-3.5 w-3.5 shrink-0" />
             e.g. &ldquo;August&rdquo; would cover{" "}
             {billingCyclePreview(cycleDay)}. Applies to reports generated with
             the &ldquo;Cycle&rdquo; period below — the custom
             &ldquo;Range&rdquo; option always uses the exact dates you pick,
-            regardless of this setting.
+            regardless of this setting. Closed months are saved; changing the
+            start day re-bills a month the next time it is opened.
           </p>
         </div>
       </CardContent>
@@ -672,7 +621,7 @@ export function AdminBilling() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [active, setActive] = React.useState<BillRow | null>(null);
-  const [tariffConfigured, setTariffConfigured] = React.useState(true);
+  const [recalculating, setRecalculating] = React.useState(false);
   const [exportingPdf, setExportingPdf] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<"all" | "incomplete" | "over">("all");
@@ -711,6 +660,36 @@ export function AdminBilling() {
   React.useEffect(() => {
     generate();
   }, [generate]);
+
+  // Replaces a saved month's frozen bills with a fresh calculation — for when
+  // a meter's late readings arrived after the month was saved. Deliberate and
+  // confirmed: a plain refresh never overwrites a saved bill.
+  const recalculate = async () => {
+    if (!report?.month) return;
+    if (
+      !window.confirm(
+        "Recalculate this month from current meter data? The saved bills will be replaced."
+      )
+    ) {
+      return;
+    }
+    setRecalculating(true);
+    try {
+      const res = await fetch("/api/billing/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: report.month }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not recalculate.");
+      setReport(data);
+      toast("Month recalculated and saved.", "success");
+    } catch (e: any) {
+      toast(e?.message || "Could not recalculate.", "error");
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   // A handful of meters share plumbing with another flat's meter (a fixed
   // physical fact, not a data issue) and have their reading corrected for
@@ -900,12 +879,7 @@ export function AdminBilling() {
 
   return (
     <div className="space-y-4">
-      <TariffEditor
-        onSaved={(slabs) => {
-          setTariffConfigured(slabs.length > 0);
-          generate();
-        }}
-      />
+      <TariffPanel onSaved={generate} />
 
       {/* Report controls */}
       <Card className="print:hidden">
@@ -1058,16 +1032,6 @@ export function AdminBilling() {
         </Card>
       )}
 
-      {!tariffConfigured && (
-        <Card className="border-warning/50 print:hidden">
-          <CardContent className="flex items-center gap-2.5 py-3.5 text-sm text-muted-foreground">
-            <IconAlert className="h-5 w-5 shrink-0 text-warning" />
-            No tariff configured yet — amounts below are ₹0. Set your slab
-            rates above and save.
-          </CardContent>
-        </Card>
-      )}
-
       {loading && !report ? (
         <Card>
           <CardContent className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -1101,6 +1065,23 @@ export function AdminBilling() {
             <span className="font-medium text-foreground">
               {periodLabel(report)}
             </span>
+            {report.source === "saved" ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Badge tone="success">Saved</Badge>
+                {report.savedAt ? `Finalized ${formatDateTime(report.savedAt)}` : null}
+                <button
+                  onClick={recalculate}
+                  disabled={recalculating}
+                  className="font-medium text-primary hover:underline disabled:opacity-50 print:hidden"
+                >
+                  {recalculating ? "Recalculating…" : "Recalculate"}
+                </button>
+              </span>
+            ) : report.finalizesOn ? (
+              <span>Live · saved automatically on {formatDate(report.finalizesOn)}</span>
+            ) : (
+              <span>Live</span>
+            )}
           </div>
 
           {/* All-flats-no-data banner — the case that most looks like a

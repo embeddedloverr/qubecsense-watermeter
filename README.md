@@ -258,6 +258,37 @@ empty the array (or drop specific flats from it) — nothing else needs to
 change; `resolveFlatConsumption()` falls straight back to nudron's own
 corrected figure the moment a flat isn't listed.
 
+**Tariff — fixed in code, not per-site.** `STANDARD_TARIFF` in `lib/billing.ts`
+is the one tariff every site is billed on (₹ per litre): slab 1 is **360 L ×
+the days in the billed period** at ₹0.03; then up to 20,000 L at ₹0.10; up to
+30,000 L at ₹0.15; above that ₹0.20. Only slab 1 scales with the month (28,
+29, 30 or 31 days → 10,080 / 10,440 / 10,800 / 11,160 L); the 20,000 / 30,000
+cut-offs are fixed. No fixed charge. The Billing page shows the table
+read-only; the only per-site setting left is the **billing cycle start day**.
+The old per-site `slabs`/`fixedCharge` fields on the Tariff document are
+ignored.
+
+**Saved bills.** A closed cycle month is frozen into `BillingSnapshot` (one
+document per site+month) and served from there — no upstream calls, no
+recalculation, and later changes to the tariff code or the paused-flat list
+can't quietly re-price it. Only the **current month is live**.
+- A month is saved on its first view once it has **settled** —
+  `SNAPSHOT_SETTLE_DAYS` (3) after it ends, since meters report a day's
+  totals the next day and a few later still; freezing on day 1 would lock in
+  avoidable `Incomplete` flats. Until then the report is live and says when it
+  will be saved.
+- A saved report shows a **Saved** badge with when it was finalized and a
+  **Recalculate** link (`POST /api/billing/report {month}`, confirmed first)
+  for when late readings arrive after the save. A plain refresh never
+  overwrites a saved bill.
+- A snapshot is only served if its dates still match the site's current
+  billing cycle; change the cycle start day and the month is rebuilt.
+- Not saved: custom **Range** reports, the current month, and any report where
+  no flat has a reading (that's an upstream problem, not a bill).
+- Owner names/phones/emails are re-read on every view — only the money is
+  frozen. Emailing a settled month's bill sends the **saved** figures, so the
+  PDF matches the record.
+
 **Period** — two ways to pick what a report covers:
 - **Cycle** — the recurring monthly bill. Defaults to the calendar month; set
   **Billing cycle start day** in the tariff card for a different cycle, e.g.

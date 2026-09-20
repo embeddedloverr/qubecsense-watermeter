@@ -17,12 +17,15 @@ import {
   HISTORY_MONTHS,
 } from "@/lib/flatConsumption";
 import {
+  STANDARD_TARIFF,
   applySlabs,
+  daysBetweenInclusive,
+  daysInMonth,
   resolveBillingPeriod,
   resolveFlatConsumption,
   resolveMonthlyHistory,
+  standardSlabs,
   type MonthlyHistoryPoint,
-  type Slab,
 } from "@/lib/billing";
 import { usageInPeriod, periodRange, type BudgetPeriod } from "@/lib/budget";
 import { Card, CardContent } from "@/components/ui";
@@ -72,29 +75,35 @@ export default async function ResidentHome() {
         : "Could not load your meter data right now.";
   }
 
-  const slabs: Slab[] = (tariffDoc as any)?.slabs || [];
-  const fixedCharge: number = (tariffDoc as any)?.fixedCharge || 0;
   const billingCycleStartDay: number =
     (tariffDoc as any)?.billingCycleStartDay || 1;
+
+  // The current month is always billed live. Same fixed tariff as admin
+  // Billing: slab 1's allowance is 360 L × the days in this cycle.
+  const month = currentMonth();
+  const resolvedPeriod = resolveBillingPeriod(
+    "cycle",
+    { month },
+    billingCycleStartDay
+  );
+  const periodDays = resolvedPeriod.ok
+    ? daysBetweenInclusive(resolvedPeriod.period.from, resolvedPeriod.period.to)
+    : daysInMonth(month);
+  const slabs = standardSlabs(periodDays);
+  const fixedCharge: number = STANDARD_TARIFF.fixedCharge;
 
   // Current-month consumption + bill, priced the same way admin Billing
   // prices it — from totalizer start→end deltas, correction-aware — rather
   // than summed from the intraday packets the chart below uses. Those two
-  // sources can disagree by design (see billing/report/route.ts): a resident
+  // sources can disagree by design (see lib/billingReport.ts): a resident
   // should never see a different "so far this month" figure here than what
   // Billing will actually charge them. Falls back to the intraday sum only
   // if the totalizer-delta source can't be reached at all.
-  const month = currentMonth();
   let monthLitres = 0;
   let monthComplete = true;
   let monthSourceOk = false;
   if (creds && flatNumber) {
     try {
-      const resolvedPeriod = resolveBillingPeriod(
-        "cycle",
-        { month },
-        billingCycleStartDay
-      );
       if (resolvedPeriod.ok) {
         const range = await fetchFlatRange(
           {
